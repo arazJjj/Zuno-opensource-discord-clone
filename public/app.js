@@ -353,11 +353,18 @@ function messageMenu(m, x, y) {
     ['🔗 Copy ID', () => navigator.clipboard?.writeText(m.id)], (mine || mod) && ['🗑️ Delete', () => confirm('Delete this message?') && tryRun(() => api('/messages/' + m.id, { method: 'DELETE' })), 'danger']]);
 }
 function editMessage(m) {
-  const el = document.querySelector(`[data-mid="${m.id}"] .body`); const old = el.querySelector('.text'); const ta = document.createElement('textarea');
-  ta.value = m.content; ta.rows = 2; ta.style.marginTop = '4px'; (old || el).after ? (old ? old.replaceWith(ta) : el.appendChild(ta)) : 0; ta.focus();
-  const hint = document.createElement('div'); hint.className = 'small muted'; hint.textContent = 'escape to cancel • enter to save'; ta.after(hint);
-  ta.onkeydown = (e) => { if (e.key === 'Escape') { const i = S.messages.indexOf(m); document.querySelector(`[data-mid="${m.id}"]`).replaceWith(msgEl(m, document.querySelector(`[data-mid="${m.id}"]`).classList.contains('first'))); }
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); tryRun(() => api('/messages/' + m.id, { method: 'PATCH', body: { content: ta.value } })); } };
+  const row = document.querySelector(`#messages [data-mid="${m.id}"]`) || document.querySelector(`[data-mid="${m.id}"]`); if (!row || row.querySelector('.edit-box')) return;
+  const el = row.querySelector('.body'); const old = el.querySelector('.text');
+  const box = document.createElement('div'); box.className = 'edit-box';
+  box.innerHTML = `<textarea rows="2" style="margin-top:4px;width:100%"></textarea><div class="small muted" style="display:flex;gap:10px;align-items:center;margin-top:4px">escape to <a href="#" data-ed="cancel">cancel</a> • enter to <a href="#" data-ed="save">save</a></div>`;
+  const ta = box.querySelector('textarea'); ta.value = m.content;
+  if (old) { old.style.display = 'none'; old.after(box); } else el.appendChild(box);
+  ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+  const done = () => { box.remove(); if (old) old.style.display = ''; };
+  const save = () => { const v = ta.value.trim(); if (!v || v === m.content) return done(); tryRun(async () => { await api('/messages/' + m.id, { method: 'PATCH', body: { content: v } }); done(); }); };
+  ta.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape' || e.key === 'Esc') { e.preventDefault(); done(); } else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save(); } });
+  box.querySelector('[data-ed="cancel"]').onclick = (e) => { e.preventDefault(); done(); };
+  box.querySelector('[data-ed="save"]').onclick = (e) => { e.preventDefault(); save(); };
 }
 function setReply(m) { S.replyTo = m; const b = $('#reply-bar'); b.classList.remove('hidden'); b.innerHTML = `<span>Replying to <b>${esc(m.author.display_name)}</b></span><button id="cancel-reply">✕</button>`; $('#cancel-reply').onclick = clearReply; $('#input').focus(); }
 function clearReply() { S.replyTo = null; $('#reply-bar').classList.add('hidden'); }
