@@ -67,6 +67,7 @@ const SHOP = [
   { id: 'deco-gold', type: 'decoration', name: 'Gold Crown', css: 'gold' },
   { id: 'deco-sakura', type: 'decoration', name: 'Sakura Petals', css: 'sakura' },
   { id: 'deco-glitch', type: 'decoration', name: 'Glitch', css: 'glitch' },
+  { id: 'deco-dragon', type: 'decoration', name: 'Red Dragon Eyes', css: 'dragon' },
   { id: 'plate-galaxy', type: 'nameplate', name: 'Galaxy', css: 'galaxy' },
   { id: 'plate-sunset', type: 'nameplate', name: 'Sunset', css: 'sunset' },
   { id: 'plate-ocean', type: 'nameplate', name: 'Ocean', css: 'ocean' },
@@ -270,6 +271,12 @@ app.get('/api/bootstrap', auth, (req, res) => {
 app.patch('/api/me', auth, (req, res) => {
   const allowed = ['display_name', 'bio', 'custom_status', 'pronouns', 'banner_color', 'avatar', 'banner', 'theme', 'decoration', 'nameplate', 'name_font'];
   if (Array.isArray(req.body.connections)) db.prepare('UPDATE users SET connections=? WHERE id=?').run(JSON.stringify(req.body.connections.slice(0, 8).map((c) => ({ type: String(c.type || '').slice(0, 20), name: String(c.name || '').slice(0, 60) })).filter((c) => c.name)), req.user.id);
+  if (req.body.username != null && String(req.body.username).toLowerCase().trim() !== req.user.username) {
+    const un = String(req.body.username).toLowerCase().trim();
+    if (!/^[a-z0-9_.]{2,32}$/.test(un)) return err(res, 'Username: 2-32 letters, numbers, _ or .');
+    if (db.prepare('SELECT 1 FROM users WHERE username=? AND id<>?').get(un, req.user.id)) return err(res, 'That username is taken');
+    db.prepare('UPDATE users SET username=? WHERE id=?').run(un, req.user.id);
+  }
   const inv = db.prepare('SELECT item_id FROM inventory WHERE user_id=?').all(req.user.id).map((r) => r.item_id);
   for (const k of allowed) if (k in req.body) {
     let v = req.body[k] == null ? null : String(req.body[k]).slice(0, k === 'bio' ? 400 : 200);
