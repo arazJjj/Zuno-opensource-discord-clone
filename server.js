@@ -7,7 +7,6 @@ const http = require('http');
 const express = require('express');
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
-const Database = require('better-sqlite3');
 const { Server } = require('socket.io');
 
 const PORT = process.env.PORT || 3000;
@@ -16,9 +15,7 @@ const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 // ---------- database ----------
-const db = new Database(path.join(DATA_DIR, 'zuno.db'));
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+const db = require('./db')(DATA_DIR);
 db.exec(`
 CREATE TABLE IF NOT EXISTS users(
   id TEXT PRIMARY KEY, email TEXT UNIQUE, username TEXT UNIQUE NOT NULL, display_name TEXT NOT NULL,
@@ -250,7 +247,8 @@ app.post('/api/register', (req, res) => {
 });
 app.post('/api/login', (req, res) => {
   const { login, password } = req.body || {};
-  const u = db.prepare('SELECT * FROM users WHERE (username=? OR email=?) AND is_bot=0').get(String(login || '').toLowerCase(), String(login || '').toLowerCase());
+  const lg = String(login || '').trim().toLowerCase();
+  const u = db.prepare('SELECT * FROM users WHERE (username=? OR email=?) AND is_bot=0').get(lg, lg);
   if (!u || !bcrypt.compareSync(password || '', u.password_hash)) return err(res, 'Wrong username/email or password', 401);
   res.json({ token: newSession(u.id), user: publicUser(u) });
 });
