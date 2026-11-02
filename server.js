@@ -98,6 +98,9 @@ function seed() {
   }
 }
 seed();
+if (!db.prepare("SELECT 1 FROM channels WHERE id='off-spam'").get()) {
+  db.prepare('INSERT INTO channels(id,server_id,name,topic,position) VALUES(?,?,?,?,?)').run('off-spam', 'official', 'spam', 'Spam all you want. No rules on message count here.', 4);
+}
 if (!db.prepare("SELECT 1 FROM channels WHERE id='off-voice'").get()) {
   db.prepare('INSERT INTO channels(id,server_id,name,topic,type,position) VALUES(?,?,?,?,?,?)').run('off-voice', 'official', 'Lounge', 'Hang out and talk', 'voice', 10);
   db.prepare('INSERT INTO channels(id,server_id,name,topic,type,position) VALUES(?,?,?,?,?,?)').run('off-gaming', 'official', 'Gaming', 'Squad up', 'voice', 11);
