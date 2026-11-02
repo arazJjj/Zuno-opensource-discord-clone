@@ -1,6 +1,6 @@
 {
   "name": "zuno",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Zuno - a free, real-time chat app for communities: servers, channels, DMs, GIFs, reactions and more.",
   "main": "server.js",
   "type": "commonjs",

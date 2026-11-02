@@ -47,6 +47,17 @@ CREATE TABLE IF NOT EXISTS bot_commands(bot_id TEXT REFERENCES users(id) ON DELE
 CREATE TABLE IF NOT EXISTS reads(user_id TEXT, target_id TEXT, last_read INTEGER, PRIMARY KEY(user_id,target_id));
 `);
 
+// ---------- 1.1 migrations ----------
+for (const sql of ['ALTER TABLE messages ADD COLUMN thread_id TEXT', 'ALTER TABLE messages ADD COLUMN poll TEXT', 'ALTER TABLE messages ADD COLUMN thread_name TEXT',
+  'ALTER TABLE users ADD COLUMN name_font TEXT', "ALTER TABLE users ADD COLUMN connections TEXT DEFAULT '[]'"]) { try { db.exec(sql); } catch {} }
+db.exec(`
+CREATE TABLE IF NOT EXISTS poll_votes(message_id TEXT, user_id TEXT, opt INTEGER, PRIMARY KEY(message_id,user_id,opt));
+CREATE TABLE IF NOT EXISTS emojis(id TEXT PRIMARY KEY, server_id TEXT, name TEXT, url TEXT, kind TEXT DEFAULT 'emoji', creator TEXT, created_at INTEGER);
+CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY, server_id TEXT, name TEXT, description TEXT DEFAULT '', location TEXT DEFAULT '', starts_at INTEGER, creator TEXT, created_at INTEGER);
+CREATE TABLE IF NOT EXISTS event_rsvps(event_id TEXT, user_id TEXT, PRIMARY KEY(event_id,user_id));
+CREATE INDEX IF NOT EXISTS idx_msg_thread ON messages(thread_id, created_at);
+`);
+
 const id = () => crypto.randomBytes(9).toString('base64url');
 const now = () => Date.now();
 const code = () => crypto.randomBytes(4).toString('hex');
@@ -89,12 +100,17 @@ function seed() {
   }
 }
 seed();
+if (!db.prepare("SELECT 1 FROM channels WHERE id='off-voice'").get()) {
+  db.prepare('INSERT INTO channels(id,server_id,name,topic,type,position) VALUES(?,?,?,?,?,?)').run('off-voice', 'official', 'Lounge', 'Hang out and talk', 'voice', 10);
+  db.prepare('INSERT INTO channels(id,server_id,name,topic,type,position) VALUES(?,?,?,?,?,?)').run('off-gaming', 'official', 'Gaming', 'Squad up', 'voice', 11);
+}
 
 // ---------- helpers ----------
 const publicUser = (u) => u && ({
   id: u.id, username: u.username, display_name: u.display_name, avatar: u.avatar, banner: u.banner,
   banner_color: u.banner_color, bio: u.bio, custom_status: u.custom_status, pronouns: u.pronouns,
   decoration: u.decoration, nameplate: u.nameplate, is_bot: !!u.is_bot, created_at: u.created_at,
+  name_font: u.name_font || null, connections: (() => { try { return JSON.parse(u.connections || '[]'); } catch { return []; } })(),
   online: online.has(u.id) || !!u.is_bot,
 });
 const getUser = (uid) => db.prepare('SELECT * FROM users WHERE id=?').get(uid);
@@ -114,7 +130,11 @@ function hydrateMessage(m) {
     const r = db.prepare('SELECT id, author_id, content FROM messages WHERE id=?').get(m.reply_to);
     if (r) reply = { id: r.id, content: r.content.slice(0, 120), author: publicUser(getUser(r.author_id)) };
   }
-  return { ...m, attachments: JSON.parse(m.attachments || '[]'), author: publicUser(getUser(m.author_id)),
+  let poll = null;
+  if (m.poll) { try { const p = JSON.parse(m.poll); const votes = db.prepare('SELECT user_id, opt FROM poll_votes WHERE message_id=?').all(m.id);
+    poll = { ...p, votes: p.options.map((_, i) => votes.filter((v) => v.opt === i).map((v) => v.user_id)), total: new Set(votes.map((v) => v.user_id)).size }; } catch {} }
+  const th = m.thread_id ? null : db.prepare('SELECT COUNT(*) n, MAX(created_at) last FROM messages WHERE thread_id=?').get(m.id);
+  return { ...m, poll, thread_count: th?.n || 0, thread_last: th?.last || null, attachments: JSON.parse(m.attachments || '[]'), author: publicUser(getUser(m.author_id)),
     reactions: Object.entries(grouped).map(([emoji, users]) => ({ emoji, users })), reply, pinned: !!m.pinned };
 }
 
@@ -125,11 +145,12 @@ function joinServer(sid, uid, role = 'member') {
   io.to('server:' + sid).emit('member:join', { server_id: sid, user: publicUser(getUser(uid)) });
 }
 
-function createMessage({ channel_id = null, dm_id = null, author_id, content = '', attachments = [], reply_to = null }) {
+function createMessage({ channel_id = null, dm_id = null, author_id, content = '', attachments = [], reply_to = null, thread_id = null, poll = null }) {
   const m = { id: id(), channel_id, dm_id, author_id, content: String(content).slice(0, 4000),
-    attachments: JSON.stringify(attachments), reply_to, created_at: now() };
-  db.prepare(`INSERT INTO messages(id,channel_id,dm_id,author_id,content,attachments,reply_to,created_at)
-    VALUES(@id,@channel_id,@dm_id,@author_id,@content,@attachments,@reply_to,@created_at)`).run(m);
+    attachments: JSON.stringify(attachments), reply_to, thread_id, poll: poll ? JSON.stringify(poll) : null, created_at: now() };
+  db.prepare(`INSERT INTO messages(id,channel_id,dm_id,author_id,content,attachments,reply_to,thread_id,poll,created_at)
+    VALUES(@id,@channel_id,@dm_id,@author_id,@content,@attachments,@reply_to,@thread_id,@poll,@created_at)`).run(m);
+  if (thread_id) setImmediate(() => { const parent = db.prepare('SELECT * FROM messages WHERE id=?').get(thread_id); if (parent) broadcastMessage(parent, 'message:update', hydrateMessage(parent)); });
   const full = hydrateMessage(db.prepare('SELECT * FROM messages WHERE id=?').get(m.id));
   const room = channel_id ? 'channel:' + channel_id : 'dm:' + dm_id;
   if (channel_id) {
@@ -147,7 +168,7 @@ const JOKES = ['Why do programmers prefer dark mode? Because light attracts bugs
   'Why was the computer cold? It left its Windows open.', 'There are 10 kinds of people: those who know binary and those who do not.'];
 const BALL = ['Yes.', 'No.', 'Definitely!', 'Ask again later.', 'Not a chance.', 'Most likely.', 'The stars say yes.', 'I would not count on it.'];
 function botReply(botId, msg, content) {
-  createMessage({ channel_id: msg.channel_id, dm_id: msg.dm_id, author_id: botId, content, reply_to: msg.id });
+  createMessage({ channel_id: msg.channel_id, dm_id: msg.dm_id, author_id: botId, content, reply_to: msg.id, thread_id: msg.thread_id || null });
 }
 function runBots(msg) {
   const text = (msg.content || '').trim();
@@ -156,7 +177,7 @@ function runBots(msg) {
   if (inZunoScope && text.startsWith('!')) {
     const [cmd, ...rest] = text.slice(1).split(/\s+/); const arg = rest.join(' ');
     const replies = {
-      help: '**Zuno Bot commands**\n`!ping` `!roll [sides]` `!coin` `!8ball question` `!joke` `!avatar` `!serverinfo` `!say text` `!time`',
+      help: '**Zuno Bot commands**\n`!ping` `!roll [sides]` `!coin` `!8ball question` `!joke` `!avatar` `!serverinfo` `!say text` `!time`\nTip: use the ＋ button for polls, stickers and threads, and join a 🔊 voice channel to talk.',
       ping: 'Pong! 🏓', coin: Math.random() < 0.5 ? '🪙 Heads' : '🪙 Tails',
       roll: '🎲 You rolled **' + (1 + Math.floor(Math.random() * (parseInt(arg) || 6))) + '**',
       '8ball': '🎱 ' + BALL[Math.floor(Math.random() * BALL.length)], joke: JOKES[Math.floor(Math.random() * JOKES.length)],
@@ -242,14 +263,15 @@ app.get('/api/bootstrap', auth, (req, res) => {
     .map((s) => ({ ...s, channels: db.prepare('SELECT * FROM channels WHERE server_id=? ORDER BY position').all(s.id), my_role: memberRole(s.id, uid) }));
   res.json({ me: { ...publicUser(req.user), email: req.user.email, theme: req.user.theme }, servers, dms: listDms(uid), friends: listFriends(uid),
     inventory: db.prepare('SELECT item_id FROM inventory WHERE user_id=?').all(uid).map((r) => r.item_id), shop: SHOP,
-    bots: db.prepare('SELECT * FROM users WHERE bot_owner=?').all(uid).map((b) => ({ ...publicUser(b), commands: db.prepare('SELECT trigger,response FROM bot_commands WHERE bot_id=?').all(b.id) })),
+    emojis: myEmojis(uid), bots: db.prepare('SELECT * FROM users WHERE bot_owner=?').all(uid).map((b) => ({ ...publicUser(b), commands: db.prepare('SELECT trigger,response FROM bot_commands WHERE bot_id=?').all(b.id) })),
     gifs_enabled: !!(process.env.TENOR_API_KEY || process.env.GIPHY_API_KEY),
     reads: Object.fromEntries(db.prepare('SELECT target_id,last_read FROM reads WHERE user_id=?').all(uid).map((r) => [r.target_id, r.last_read])) });
 });
 
 // profile & settings
 app.patch('/api/me', auth, (req, res) => {
-  const allowed = ['display_name', 'bio', 'custom_status', 'pronouns', 'banner_color', 'avatar', 'banner', 'theme', 'decoration', 'nameplate'];
+  const allowed = ['display_name', 'bio', 'custom_status', 'pronouns', 'banner_color', 'avatar', 'banner', 'theme', 'decoration', 'nameplate', 'name_font'];
+  if (Array.isArray(req.body.connections)) db.prepare('UPDATE users SET connections=? WHERE id=?').run(JSON.stringify(req.body.connections.slice(0, 8).map((c) => ({ type: String(c.type || '').slice(0, 20), name: String(c.name || '').slice(0, 60) })).filter((c) => c.name)), req.user.id);
   const inv = db.prepare('SELECT item_id FROM inventory WHERE user_id=?').all(req.user.id).map((r) => r.item_id);
   for (const k of allowed) if (k in req.body) {
     let v = req.body[k] == null ? null : String(req.body[k]).slice(0, k === 'bio' ? 400 : 200);
@@ -383,7 +405,7 @@ app.post('/api/servers/:id/channels', auth, (req, res) => {
   if (!name) return err(res, 'Channel needs a name');
   const pos = db.prepare('SELECT COALESCE(MAX(position),0)+1 p FROM channels WHERE server_id=?').get(req.params.id).p;
   const cid = id();
-  db.prepare('INSERT INTO channels(id,server_id,name,topic,type,position) VALUES(?,?,?,?,?,?)').run(cid, req.params.id, name, String(req.body.topic || ''), req.body.type === 'announcement' ? 'announcement' : 'text', pos);
+  db.prepare('INSERT INTO channels(id,server_id,name,topic,type,position) VALUES(?,?,?,?,?,?)').run(cid, req.params.id, name, String(req.body.topic || ''), ['announcement', 'voice'].includes(req.body.type) ? req.body.type : 'text', pos);
   const s = serverFull(req.params.id, req.user.id); io.to('server:' + s.id).emit('server:update', s); res.json(channel(cid));
 });
 app.patch('/api/channels/:id', auth, (req, res) => {
@@ -404,12 +426,17 @@ function canSee(req, { channel_id, dm_id }) {
   return dm_id && inDm(dm_id, req.user.id);
 }
 app.get('/api/messages', auth, (req, res) => {
-  const { channel_id, dm_id, before, q } = req.query;
+  const { channel_id, dm_id, before, q, thread_id } = req.query;
+  if (thread_id) {
+    const parent = db.prepare('SELECT * FROM messages WHERE id=?').get(thread_id);
+    if (!parent || !canSee(req, parent)) return err(res, 'No access', 403);
+    return res.json({ parent: hydrateMessage(parent), messages: db.prepare('SELECT * FROM messages WHERE thread_id=? ORDER BY created_at LIMIT 500').all(thread_id).map(hydrateMessage) });
+  }
   if (!canSee(req, { channel_id, dm_id })) return err(res, 'No access', 403);
   const col = channel_id ? 'channel_id' : 'dm_id';
   let rows;
   if (q) rows = db.prepare(`SELECT * FROM messages WHERE ${col}=? AND content LIKE ? ORDER BY created_at DESC LIMIT 50`).all(channel_id || dm_id, '%' + q + '%');
-  else rows = db.prepare(`SELECT * FROM messages WHERE ${col}=? AND created_at < ? ORDER BY created_at DESC LIMIT 50`).all(channel_id || dm_id, Number(before) || 9e15);
+  else rows = db.prepare(`SELECT * FROM messages WHERE ${col}=? AND thread_id IS NULL AND created_at < ? ORDER BY created_at DESC LIMIT 50`).all(channel_id || dm_id, Number(before) || 9e15);
   res.json(rows.reverse().map(hydrateMessage));
 });
 app.get('/api/pins', auth, (req, res) => {
@@ -417,7 +444,10 @@ app.get('/api/pins', auth, (req, res) => {
   res.json(db.prepare(`SELECT * FROM messages WHERE ${channel_id ? 'channel_id' : 'dm_id'}=? AND pinned=1 ORDER BY created_at DESC`).all(channel_id || dm_id).map(hydrateMessage));
 });
 app.post('/api/messages', auth, (req, res) => {
-  const { channel_id, dm_id, content, attachments, reply_to } = req.body || {};
+  let { channel_id, dm_id, content, attachments, reply_to, thread_id, poll } = req.body || {};
+  if (thread_id) { const parent = db.prepare('SELECT * FROM messages WHERE id=?').get(thread_id); if (!parent || parent.thread_id) return err(res, 'Thread not found', 404); channel_id = parent.channel_id; dm_id = parent.dm_id; }
+  if (poll) { const q = String(poll.question || '').trim().slice(0, 300); const opts = (Array.isArray(poll.options) ? poll.options : []).map((o) => String(o).trim().slice(0, 100)).filter(Boolean).slice(0, 10);
+    if (!q || opts.length < 2) return err(res, 'A poll needs a question and at least 2 answers'); poll = { question: q, options: opts, multi: !!poll.multi }; } else poll = null;
   if (!canSee(req, { channel_id, dm_id })) return err(res, 'No access', 403);
   if (channel_id) { const ch = channel(channel_id); if (ch.type === 'announcement' && !canManage(ch.server_id, req.user.id)) return err(res, 'Only admins can post here', 403); }
   if (dm_id) { // blocked?
@@ -425,9 +455,9 @@ app.post('/api/messages', auth, (req, res) => {
     const d = db.prepare('SELECT is_group FROM dms WHERE id=?').get(dm_id);
     if (!d.is_group && others.some((o) => db.prepare('SELECT 1 FROM blocks WHERE user_id=? AND blocked_id=?').get(o.user_id, req.user.id))) return err(res, 'You cannot message this user', 403);
   }
-  const att = Array.isArray(attachments) ? attachments.slice(0, 10).filter((a) => a && typeof a.url === 'string').map((a) => ({ url: a.url, name: String(a.name || ''), type: String(a.type || ''), gif: !!a.gif })) : [];
-  if (!String(content || '').trim() && !att.length) return err(res, 'Empty message');
-  res.json(createMessage({ channel_id: channel_id || null, dm_id: dm_id || null, author_id: req.user.id, content, attachments: att, reply_to: reply_to || null }));
+  const att = Array.isArray(attachments) ? attachments.slice(0, 10).filter((a) => a && typeof a.url === 'string').map((a) => ({ url: a.url, name: String(a.name || ''), type: String(a.type || ''), gif: !!a.gif, sticker: !!a.sticker })) : [];
+  if (!String(content || '').trim() && !att.length && !poll) return err(res, 'Empty message');
+  res.json(createMessage({ channel_id: channel_id || null, dm_id: dm_id || null, author_id: req.user.id, content, attachments: att, reply_to: reply_to || null, thread_id: thread_id || null, poll }));
 });
 function broadcastMessage(m, event, payload) {
   if (m.channel_id) io.to('server:' + channel(m.channel_id).server_id).emit(event, payload);
@@ -565,6 +595,144 @@ app.get('/api/bots/:id/token', auth, (req, res) => {
   res.json({ token: b.bot_token });
 });
 
+// ---------- 1.1: polls ----------
+app.post('/api/messages/:id/vote', auth, (req, res) => {
+  const m = db.prepare('SELECT * FROM messages WHERE id=?').get(req.params.id);
+  if (!m || !m.poll || !canSee(req, m)) return err(res, 'Poll not found', 404);
+  const p = JSON.parse(m.poll); const opt = Number(req.body.option);
+  if (!(opt >= 0 && opt < p.options.length)) return err(res, 'Bad option');
+  const has = db.prepare('SELECT 1 FROM poll_votes WHERE message_id=? AND user_id=? AND opt=?').get(m.id, req.user.id, opt);
+  if (has) db.prepare('DELETE FROM poll_votes WHERE message_id=? AND user_id=? AND opt=?').run(m.id, req.user.id, opt);
+  else { if (!p.multi) db.prepare('DELETE FROM poll_votes WHERE message_id=? AND user_id=?').run(m.id, req.user.id); db.prepare('INSERT INTO poll_votes VALUES(?,?,?)').run(m.id, req.user.id, opt); }
+  const full = hydrateMessage(db.prepare('SELECT * FROM messages WHERE id=?').get(m.id)); broadcastMessage(m, 'message:update', full); res.json(full);
+});
+
+// ---------- 1.1: custom emoji & stickers ----------
+const BUILTIN_STICKERS = ['wave', 'gg', 'lol', 'love', 'fire', 'zuno', 'sad', 'wow'].map((n) => ({ id: 'z-' + n, server_id: null, name: n, url: '/stickers/' + n + '.svg', kind: 'sticker' }));
+function myEmojis(uid) {
+  return BUILTIN_STICKERS.concat(db.prepare('SELECT e.* FROM emojis e JOIN members m ON m.server_id=e.server_id AND m.user_id=? ORDER BY e.created_at').all(uid));
+}
+app.get('/api/emojis', auth, (req, res) => res.json(myEmojis(req.user.id)));
+app.post('/api/servers/:id/emojis', auth, (req, res) => {
+  if (!canManage(req.params.id, req.user.id)) return err(res, 'Only admins can add emoji', 403);
+  const name = String(req.body.name || '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 32); const url = String(req.body.url || '');
+  if (!name || !url.startsWith('/uploads/')) return err(res, 'Give it a name and an image');
+  const kind = req.body.kind === 'sticker' ? 'sticker' : 'emoji';
+  if (db.prepare('SELECT COUNT(*) n FROM emojis WHERE server_id=?').get(req.params.id).n >= 100) return err(res, 'This server has 100 emoji already');
+  const e = { id: id(), server_id: req.params.id, name, url, kind, creator: req.user.id, created_at: now() };
+  db.prepare('INSERT INTO emojis VALUES(@id,@server_id,@name,@url,@kind,@creator,@created_at)').run(e);
+  io.to('server:' + req.params.id).emit('emojis:changed'); res.json(e);
+});
+app.delete('/api/emojis/:id', auth, (req, res) => {
+  const e = db.prepare('SELECT * FROM emojis WHERE id=?').get(req.params.id);
+  if (!e || !canManage(e.server_id, req.user.id)) return err(res, 'Not allowed', 403);
+  db.prepare('DELETE FROM emojis WHERE id=?').run(e.id); io.to('server:' + e.server_id).emit('emojis:changed'); res.json({ ok: true });
+});
+
+// ---------- 1.1: events ----------
+const eventFull = (e, uid) => ({ ...e, going: db.prepare('SELECT COUNT(*) n FROM event_rsvps WHERE event_id=?').get(e.id).n, me_going: !!db.prepare('SELECT 1 FROM event_rsvps WHERE event_id=? AND user_id=?').get(e.id, uid), creator_user: publicUser(getUser(e.creator)) });
+app.get('/api/servers/:id/events', auth, (req, res) => {
+  if (!isMember(req.params.id, req.user.id)) return err(res, 'No access', 403);
+  res.json(db.prepare('SELECT * FROM events WHERE server_id=? AND starts_at > ? ORDER BY starts_at').all(req.params.id, now() - 6 * 3600e3).map((e) => eventFull(e, req.user.id)));
+});
+app.post('/api/servers/:id/events', auth, (req, res) => {
+  if (!canManage(req.params.id, req.user.id)) return err(res, 'Only admins can create events', 403);
+  const name = String(req.body.name || '').trim().slice(0, 100); const starts = Number(req.body.starts_at);
+  if (!name || !starts) return err(res, 'Event needs a name and a time');
+  const e = { id: id(), server_id: req.params.id, name, description: String(req.body.description || '').slice(0, 1000), location: String(req.body.location || '').slice(0, 200), starts_at: starts, creator: req.user.id, created_at: now() };
+  db.prepare('INSERT INTO events VALUES(@id,@server_id,@name,@description,@location,@starts_at,@creator,@created_at)').run(e);
+  db.prepare('INSERT OR IGNORE INTO event_rsvps VALUES(?,?)').run(e.id, req.user.id);
+  io.to('server:' + req.params.id).emit('events:changed', { server_id: req.params.id }); res.json(eventFull(e, req.user.id));
+});
+app.post('/api/events/:id/rsvp', auth, (req, res) => {
+  const e = db.prepare('SELECT * FROM events WHERE id=?').get(req.params.id); if (!e || !isMember(e.server_id, req.user.id)) return err(res, 'Not found', 404);
+  if (db.prepare('SELECT 1 FROM event_rsvps WHERE event_id=? AND user_id=?').get(e.id, req.user.id)) db.prepare('DELETE FROM event_rsvps WHERE event_id=? AND user_id=?').run(e.id, req.user.id);
+  else db.prepare('INSERT INTO event_rsvps VALUES(?,?)').run(e.id, req.user.id);
+  io.to('server:' + e.server_id).emit('events:changed', { server_id: e.server_id }); res.json(eventFull(e, req.user.id));
+});
+app.delete('/api/events/:id', auth, (req, res) => {
+  const e = db.prepare('SELECT * FROM events WHERE id=?').get(req.params.id); if (!e || !canManage(e.server_id, req.user.id)) return err(res, 'Not allowed', 403);
+  db.prepare('DELETE FROM events WHERE id=?').run(e.id); db.prepare('DELETE FROM event_rsvps WHERE event_id=?').run(e.id);
+  io.to('server:' + e.server_id).emit('events:changed', { server_id: e.server_id }); res.json({ ok: true });
+});
+
+// ---------- 1.1: reorder channels ----------
+app.post('/api/servers/:id/reorder', auth, (req, res) => {
+  if (!canManage(req.params.id, req.user.id)) return err(res, 'Only admins can move channels', 403);
+  const ids = Array.isArray(req.body.ids) ? req.body.ids : [];
+  const upd = db.prepare('UPDATE channels SET position=? WHERE id=? AND server_id=?');
+  db.transaction(() => ids.forEach((cid, i) => upd.run(i, String(cid), req.params.id)))();
+  const s = serverFull(req.params.id, req.user.id); io.to('server:' + s.id).emit('server:update', s); res.json({ ok: true });
+});
+
+// ---------- 1.1: delete account ----------
+app.post('/api/me/delete', auth, (req, res) => {
+  const u = req.user; if (u.is_bot) return err(res, 'Bots cannot do this');
+  if (!bcrypt.compareSync(req.body.password || '', u.password_hash)) return err(res, 'Wrong password');
+  if (db.prepare('SELECT 1 FROM servers WHERE owner_id=?').get(u.id)) return err(res, 'Delete or hand over the servers you own first');
+  db.transaction(() => {
+    db.prepare("UPDATE messages SET content='', attachments='[]', author_id='deleted' WHERE author_id=?").run(u.id);
+    for (const t of ['members', 'dm_members', 'inventory', 'reads', 'poll_votes', 'event_rsvps', 'blocks', 'sessions']) db.prepare(`DELETE FROM ${t} WHERE user_id=?`).run(u.id);
+    db.prepare('DELETE FROM friends WHERE user_id=? OR friend_id=?').run(u.id, u.id);
+    db.prepare('DELETE FROM users WHERE bot_owner=?').run(u.id);
+    db.prepare('DELETE FROM users WHERE id=?').run(u.id);
+  })();
+  if (!getUser('deleted')) db.prepare("INSERT INTO users(id,username,display_name,created_at) VALUES('deleted','deleted_user','Deleted User',?)").run(now());
+  io.in('user:' + u.id).disconnectSockets(); res.json({ ok: true });
+});
+
+// ---------- 1.1: voice / video ----------
+app.get('/api/ice', auth, (req, res) => {
+  const ice = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+  if (process.env.TURN_URL) ice.push({ urls: process.env.TURN_URL.split(','), username: process.env.TURN_USER, credential: process.env.TURN_PASS });
+  else ice.push({ urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turns:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' });
+  res.json(ice);
+});
+
+// ---------- 1.1: voice state (in memory) ----------
+const voiceRooms = new Map(); // room -> Map(socketId -> { uid, muted, deaf, video, screen })
+const activities = new Map(); // room -> activity state
+function roomAccess(room, uid) {
+  if (room.startsWith('ch:')) { const ch = channel(room.slice(3)); return ch && ch.type === 'voice' && isMember(ch.server_id, uid); }
+  if (room.startsWith('dm:')) return inDm(room.slice(3), uid);
+  return false;
+}
+function voicePayload(room) {
+  const m = voiceRooms.get(room); const a = activities.get(room);
+  return { room, users: m ? [...m.entries()].map(([sid, v]) => ({ sid, ...v })) : [], activity: a ? a.type : null };
+}
+function emitVoice(room) {
+  const p = voicePayload(room);
+  if (room.startsWith('ch:')) { const ch = channel(room.slice(3)); if (ch) io.to('server:' + ch.server_id).emit('voice:update', p); }
+  else for (const r of db.prepare('SELECT user_id FROM dm_members WHERE dm_id=?').all(room.slice(3))) io.to('user:' + r.user_id).emit('voice:update', p);
+}
+function voiceJoin(socket, room) {
+  const uid = socket.user.id;
+  if (!roomAccess(room, uid)) return socket.emit('voice:error', 'You cannot join that call');
+  if (socket.voiceRoom === room) return;
+  voiceLeave(socket);
+  if (!voiceRooms.has(room)) voiceRooms.set(room, new Map());
+  const m = voiceRooms.get(room); const wasEmpty = m.size === 0;
+  socket.emit('voice:peers', { room, peers: [...m.entries()].map(([sid, v]) => ({ sid, uid: v.uid })) });
+  m.set(socket.id, { uid, muted: false, deaf: false, video: false, screen: false });
+  socket.voiceRoom = room; socket.join('voice:' + room);
+  const a = activities.get(room); if (a) socket.emit('activity:state', { room, ...a });
+  emitVoice(room);
+  if (room.startsWith('dm:') && wasEmpty) {
+    const did = room.slice(3);
+    for (const r of db.prepare('SELECT user_id FROM dm_members WHERE dm_id=? AND user_id<>?').all(did, uid)) io.to('user:' + r.user_id).emit('call:ring', { dm_id: did, from: publicUser(socket.user) });
+  }
+  if (room.startsWith('dm:')) io.to('user:' + uid).emit('call:stopring', { dm_id: room.slice(3) });
+}
+function voiceLeave(socket) {
+  const room = socket.voiceRoom; if (!room) return;
+  const m = voiceRooms.get(room); m?.delete(socket.id); socket.leave('voice:' + room); socket.voiceRoom = null;
+  io.to('voice:' + room).emit('voice:left', { sid: socket.id });
+  if (m && m.size === 0) { voiceRooms.delete(room); activities.delete(room);
+    if (room.startsWith('dm:')) for (const r of db.prepare('SELECT user_id FROM dm_members WHERE dm_id=?').all(room.slice(3))) io.to('user:' + r.user_id).emit('call:stopring', { dm_id: room.slice(3) }); }
+  emitVoice(room);
+}
+
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 // ---------- realtime ----------
@@ -584,7 +752,45 @@ io.on('connection', (socket) => {
     if (channel_id) { const ch = channel(channel_id); if (ch && isMember(ch.server_id, uid)) socket.to('server:' + ch.server_id).emit('typing', payload); }
     else if (dm_id && inDm(dm_id, uid)) for (const r of db.prepare('SELECT user_id FROM dm_members WHERE dm_id=? AND user_id<>?').all(dm_id, uid)) io.to('user:' + r.user_id).emit('typing', payload);
   });
+  // ---------- 1.1: voice, video, screen share, activities ----------
+  socket.on('voice:join', ({ room } = {}) => voiceJoin(socket, String(room || '')));
+  socket.on('voice:leave', () => voiceLeave(socket));
+  socket.on('voice:signal', ({ to, data } = {}) => {
+    const r = socket.voiceRoom; if (!r || !voiceRooms.get(r)?.has(to)) return;
+    io.to(to).emit('voice:signal', { from: socket.id, uid, data });
+  });
+  socket.on('voice:state', (st = {}) => {
+    const r = socket.voiceRoom; const me = r && voiceRooms.get(r)?.get(socket.id); if (!me) return;
+    for (const k of ['muted', 'deaf', 'video', 'screen']) if (k in st) me[k] = !!st[k];
+    emitVoice(r);
+  });
+  socket.on('call:decline', ({ dm_id } = {}) => {
+    if (!dm_id || !inDm(dm_id, uid)) return;
+    for (const r of db.prepare('SELECT user_id FROM dm_members WHERE dm_id=? AND user_id<>?').all(dm_id, uid)) io.to('user:' + r.user_id).emit('call:declined', { dm_id, uid });
+    io.to('user:' + uid).emit('call:stopring', { dm_id });
+  });
+  socket.on('activity:start', ({ type } = {}) => {
+    const r = socket.voiceRoom; if (!r || !['whiteboard', 'watch'].includes(type)) return;
+    activities.set(r, { type, strokes: [], queue: [], current: null, playing: false, t: 0, at: now(), by: uid });
+    io.to('voice:' + r).emit('activity:state', { room: r, ...activities.get(r) }); emitVoice(r);
+  });
+  socket.on('activity:stop', () => { const r = socket.voiceRoom; if (!r) return; activities.delete(r); io.to('voice:' + r).emit('activity:state', { room: r, type: null }); emitVoice(r); });
+  socket.on('activity:event', (ev = {}) => {
+    const r = socket.voiceRoom; const a = r && activities.get(r); if (!a) return;
+    if (a.type === 'whiteboard') {
+      if (ev.kind === 'stroke' && Array.isArray(ev.points) && ev.points.length < 2000) { a.strokes.push({ c: String(ev.c || '#fff').slice(0, 9), w: Math.min(30, Number(ev.w) || 3), points: ev.points }); if (a.strokes.length > 3000) a.strokes.shift(); }
+      if (ev.kind === 'clear') a.strokes = [];
+    } else if (a.type === 'watch') {
+      if (ev.kind === 'queue' && typeof ev.video === 'string') { a.queue.push(ev.video.slice(0, 20)); if (!a.current) { a.current = a.queue.shift(); a.playing = true; a.t = 0; a.at = now(); } }
+      if (ev.kind === 'next' && ev.current === a.current) { a.current = a.queue.shift() || null; a.playing = !!a.current; a.t = 0; a.at = now(); }
+      if (ev.kind === 'play' || ev.kind === 'pause' || ev.kind === 'seek') { a.playing = ev.kind === 'seek' ? a.playing : ev.kind === 'play'; a.t = Number(ev.t) || 0; a.at = now(); }
+      io.to('voice:' + r).emit('activity:state', { room: r, ...a, strokes: undefined }); return;
+    }
+    socket.to('voice:' + r).emit('activity:event', { room: r, uid, ...ev });
+  });
+  for (const [room] of voiceRooms) if (roomAccess(room, uid)) socket.emit('voice:update', voicePayload(room));
   socket.on('disconnect', () => {
+    voiceLeave(socket);
     const n = (online.get(uid) || 1) - 1;
     if (n <= 0) { online.delete(uid); io.emit('presence', { user_id: uid, online: false }); } else online.set(uid, n);
   });

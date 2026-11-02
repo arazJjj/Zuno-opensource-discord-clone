@@ -2,6 +2,16 @@
 
 Free, real-time chat for communities. Everything other apps charge for (banners, animated avatar decorations, name plates, GIF avatars) is free on Zuno.
 
+## New in 1.1
+- 🔊 Voice channels and 📞 DM / group calls with ringtone
+- 🎥 Camera, 🖥️ screen share, mute / deafen, speaking rings
+- 🎲 Activities: Whiteboard and Watch Together (YouTube queue)
+- 🔔 Sounds for messages, mentions, joins, leaves and mutes (toggle in Settings)
+- 🧵 Threads, 📊 polls, 🎟️ stickers, 😀 custom server emoji
+- 📅 Server events with RSVP, drag-to-reorder channels
+- Free name fonts, profile connections, delete account, Get the app page
+- Android app: mic, camera and native notifications
+
 ## Features
 - Sign up with email, display name, username and password; log in with email or username
 - Everyone lands in the official **Zuno HQ** server, with a welcome DM from **Zuno Bot**

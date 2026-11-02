@@ -39,7 +39,7 @@ function logout() { if (S.token) fetch('/api/logout', { method: 'POST', headers:
 async function start() {
   if (!S.token) return showAuth();
   let b; try { b = await api('/bootstrap'); } catch { return showAuth(); }
-  Object.assign(S, { me: b.me, servers: b.servers, dms: b.dms, friends: b.friends, inventory: b.inventory, shop: b.shop, bots: b.bots, reads: b.reads, gifsEnabled: b.gifs_enabled });
+  Object.assign(S, { me: b.me, servers: b.servers, dms: b.dms, friends: b.friends, inventory: b.inventory, shop: b.shop, bots: b.bots, reads: b.reads, gifsEnabled: b.gifs_enabled, emojis: b.emojis || [] });
   cacheUser(b.me); b.dms.forEach((d) => d.members.forEach(cacheUser)); b.friends.forEach((f) => cacheUser(f.user));
   document.body.classList.toggle('light', S.me.theme === 'light');
   $('#auth').classList.add('hidden'); $('#app').classList.remove('hidden');
@@ -58,6 +58,9 @@ function connect() {
   socket = io({ auth: { token: S.token } });
   socket.on('message:new', (m) => {
     cacheUser(m.author);
+    if (m.thread_id) { window.ZT?.onMessage(m); if (m.author_id !== S.me.id && mentionsMe(m.content)) { Z.sound('mention'); notify(m); } return; }
+    if (m.author_id !== S.me.id && !m.author?.is_bot) { const here0 = (m.channel_id && m.channel_id === S.view.channel) || (m.dm_id && m.dm_id === S.view.dm);
+      if (m.dm_id || mentionsMe(m.content)) Z.sound(mentionsMe(m.content) ? 'mention' : 'message'); else if (here0 && document.hasFocus()) Z.sound('soft'); }
     const here = (m.channel_id && m.channel_id === S.view.channel) || (m.dm_id && m.dm_id === S.view.dm);
     if (here) { S.messages.push(m); appendMessage(m); markRead(); delete S.typing[m.author_id]; renderTyping(); }
     else {
@@ -79,12 +82,16 @@ function connect() {
   socket.on('member:leave', ({ server_id, user_id }) => { if (S.members[server_id]) S.members[server_id] = S.members[server_id].filter((m) => m.id !== user_id); renderMembers(); });
   socket.on('dm:update', (d) => { if (!d) return; d.members.forEach(cacheUser); const i = S.dms.findIndex((x) => x.id === d.id); if (i > -1) S.dms[i] = d; else S.dms.unshift(d); renderSidebar(); renderRail(); if (S.view.dm === d.id) { renderHead(); renderMembers(); } });
   socket.on('friends:update', (f) => { S.friends = f; f.forEach((x) => cacheUser(x.user)); renderRail(); if (S.view.type === 'home') { renderSidebar(); if (!S.view.dm) renderFriends(); } });
+  window.ZV?.bind(socket); window.ZT?.bind(socket);
+  socket.on('emojis:changed', async () => { S.emojis = await api('/emojis').catch(() => S.emojis); });
+  socket.on('events:changed', ({ server_id }) => { if (S.view.server === server_id) window.ZE?.refresh(); });
   socket.on('connect_error', (e) => { if (e.message === 'unauthorized') logout(); });
 }
 setInterval(() => { let ch = false; for (const k in S.typing) if (Date.now() - S.typing[k].at > 6000) { delete S.typing[k]; ch = true; } if (ch) renderTyping(); }, 2000);
 
 function notify(m) {
-  if (document.hasFocus()) return;
+  if (document.hasFocus() && !document.hidden) return;
+  if (window.ZunoAndroid?.notify) { try { ZunoAndroid.notify(m.author.display_name, m.content || (m.poll ? '📊 ' + m.poll.question : 'Sent an attachment')); } catch {} return; }
   if (Notification?.permission === 'granted') new Notification(m.author.display_name, { body: m.content || 'Sent an attachment', icon: m.author.avatar || '/logo.svg' });
 }
 const mentionsMe = (t) => new RegExp('@(' + S.me.username + '|everyone)\\b', 'i').test(t || '');
@@ -115,6 +122,7 @@ function markdown(src) {
     .replace(/~~(.+?)~~/g, '<s>$1</s>').replace(/\|\|(.+?)\|\|/g, '<span class="spoiler">$1</span>')
     .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')
     .replace(/(^|\s)@([a-z0-9_.]{2,32}|everyone)\b/gi, (m, sp, u) => `${sp}<span class="mention-pill" data-user="${u.toLowerCase()}">@${u}</span>`);
+  t = t.replace(/:([a-z0-9_]{2,32}):/g, (m0, n) => { const e = (S.emojis || []).find((x) => x.name === n && x.kind === 'emoji'); return e ? `<img class="cemoji" src="${esc(e.url)}" alt=":${n}:" title=":${n}:">` : m0; });
   return t.replace(/\u0000(\d+)\u0000/g, (_, i) => blocks[i]);
 }
 const imgUrlRe = /^(https?:\/\/\S+\.(gif|png|jpe?g|webp)(\?\S*)?|https?:\/\/media\d?\.(giphy|tenor)\.com\/\S+)$/i;
@@ -179,10 +187,23 @@ function renderSidebar() {
     const admin = ['owner', 'admin'].includes(s.my_role);
     head.innerHTML = `<span>${esc(s.name)}</span><span>⌄</span>`; head.onclick = (e) => serverMenu(s, e.clientX, 52);
     body.innerHTML = (s.banner ? `<div class="server-banner" style="background-image:url('${esc(s.banner)}')"></div>` : '') +
+      `<div class="side-item" id="events-btn"><span class="hash">📅</span><span>Events</span></div>` +
       `<div class="side-cat"><span>Text channels</span>${admin ? '<button id="add-ch" title="Create channel">+</button>' : ''}</div>` +
-      s.channels.map((c) => `<div class="side-item ${c.id === S.view.channel ? 'active' : ''} ${c.id !== S.view.channel && isUnread(c.id, S.lastMsg?.[c.id]) ? 'unread' : ''}" data-ch="${c.id}">
-        <span class="hash">${c.type === 'announcement' ? '📢' : '#'}</span><span>${esc(c.name)}</span>${admin ? `<button class="x" data-edit-ch="${c.id}" title="Edit">⚙</button>` : ''}</div>`).join('');
+      s.channels.filter((c) => c.type !== 'voice').map((c) => `<div class="side-item ${c.id === S.view.channel ? 'active' : ''} ${c.id !== S.view.channel && isUnread(c.id, S.lastMsg?.[c.id]) ? 'unread' : ''}" data-ch="${c.id}" ${admin ? 'draggable="true"' : ''}>
+        <span class="hash">${c.type === 'announcement' ? '📢' : '#'}</span><span>${esc(c.name)}</span>${admin ? `<button class="x" data-edit-ch="${c.id}" title="Edit">⚙</button>` : ''}</div>`).join('') +
+      `<div class="side-cat"><span>Voice channels</span>${admin ? '<button id="add-vc" title="Create voice channel">+</button>' : ''}</div>` +
+      s.channels.filter((c) => c.type === 'voice').map((c) => `<div class="side-item voice-ch ${window.ZV?.room === 'ch:' + c.id ? 'active' : ''}" data-vc="${c.id}" ${admin ? 'draggable="true"' : ''}>
+        <span class="hash">🔊</span><span>${esc(c.name)}</span>${window.ZV?.activityOf('ch:' + c.id) ? '<span class="tag" style="background:var(--green)">LIVE</span>' : ''}${admin ? `<button class="x" data-edit-ch="${c.id}" title="Edit">⚙</button>` : ''}</div>${window.ZV ? ZV.listHtml('ch:' + c.id) : ''}`).join('');
     body.querySelectorAll('[data-ch]').forEach((el) => (el.onclick = (e) => { if (e.target.closest('[data-edit-ch]')) return editChannelModal(s, s.channels.find((c) => c.id === el.dataset.ch)); openChannel(s.id, el.dataset.ch); }));
+    body.querySelectorAll('[data-vc]').forEach((el) => (el.onclick = (e) => { if (e.target.closest('[data-edit-ch]')) return editChannelModal(s, s.channels.find((c) => c.id === el.dataset.vc)); window.ZV?.join('ch:' + el.dataset.vc, s.channels.find((c) => c.id === el.dataset.vc).name); }));
+    $('#events-btn').onclick = () => window.ZE?.open(s);
+    $('#add-vc') && ($('#add-vc').onclick = () => createChannelModal(s, 'voice'));
+    if (admin) { let drag = null;
+      body.querySelectorAll('[draggable]').forEach((el) => { el.ondragstart = () => { drag = el; el.style.opacity = .4; }; el.ondragend = () => { el.style.opacity = ''; };
+        el.ondragover = (e) => { e.preventDefault(); }; el.ondrop = (e) => { e.preventDefault(); if (!drag || drag === el) return;
+          const ids = s.channels.map((c) => c.id); const from = ids.indexOf(drag.dataset.ch || drag.dataset.vc); const to = ids.indexOf(el.dataset.ch || el.dataset.vc);
+          ids.splice(to, 0, ids.splice(from, 1)[0]); s.channels.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id)); renderSidebar();
+          tryRun(() => api(`/servers/${s.id}/reorder`, { body: { ids } })); }; }); }
     $('#add-ch') && ($('#add-ch').onclick = () => createChannelModal(s));
   }
 }
@@ -220,7 +241,9 @@ function renderHead() {
   } else if (S.view.dm) {
     const d = S.dms.find((x) => x.id === S.view.dm); if (!d) return;
     h.innerHTML = `${menu}${d.is_group ? '👥' : avatar(dmOther(d), 24, true)}<span class="title">${esc(dmName(d))}</span>
-      <div class="tools">${d.is_group ? '<button id="grp-edit" title="Group settings">✏️</button><button id="grp-add" title="Add people">➕</button>' : ''}<button id="pins-btn" title="Pinned">📌</button><button id="search-btn" title="Search">🔍</button><button id="mem-toggle" title="Members">👥</button></div>`;
+      <div class="tools"><button id="call-btn" title="Voice call">📞</button><button id="vcall-btn" title="Video call">🎥</button>${d.is_group ? '<button id="grp-edit" title="Group settings">✏️</button><button id="grp-add" title="Add people">➕</button>' : ''}<button id="pins-btn" title="Pinned">📌</button><button id="search-btn" title="Search">🔍</button><button id="mem-toggle" title="Members">👥</button></div>`;
+    $('#call-btn').onclick = () => window.ZV?.join('dm:' + d.id, dmName(d));
+    $('#vcall-btn').onclick = () => window.ZV?.join('dm:' + d.id, dmName(d), { video: true });
     $('#grp-edit') && ($('#grp-edit').onclick = () => groupEditModal(d)); $('#grp-add') && ($('#grp-add').onclick = () => newDmModal(d));
   } else {
     const c = curChannel(); if (!c) return;
@@ -289,13 +312,15 @@ function msgEl(m, first) {
   const role = S.view.server && S.members[S.view.server]?.find((x) => x.id === m.author_id)?.role;
   el.innerHTML = `${first ? `<div style="cursor:pointer" data-prof="${a.id}">${avatar(a, 40)}</div>` : `<div class="gutter">${new Date(m.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>`}
     <div class="body">${m.reply ? `<div class="reply-ref" data-jump="${m.reply.id}">${avatar(m.reply.author, 16)}<b>${esc(m.reply.author?.display_name)}</b> <span>${esc(m.reply.content || 'Attachment')}</span></div>` : ''}
-    ${first ? `<div class="meta"><span class="name" data-prof="${a.id}" style="${role === 'owner' ? 'color:#f0b232' : role === 'admin' ? 'color:#eb459e' : ''}">${esc(a.display_name)}</span>${a.is_bot ? '<span class="tag">BOT</span>' : ''}${role === 'owner' ? ' 👑' : ''}<span class="time">${fmtTime(m.created_at)}</span>${m.pinned ? '<span title="Pinned">📌</span>' : ''}</div>` : ''}
+    ${first ? `<div class="meta"><span class="name${a.name_font ? ' font-' + esc(a.name_font) : ''}" data-prof="${a.id}" style="${role === 'owner' ? 'color:#f0b232' : role === 'admin' ? 'color:#eb459e' : ''}">${esc(a.display_name)}</span>${a.is_bot ? '<span class="tag">BOT</span>' : ''}${role === 'owner' ? ' 👑' : ''}<span class="time">${fmtTime(m.created_at)}</span>${m.pinned ? '<span title="Pinned">📌</span>' : ''}</div>` : ''}
     ${content ? `<div class="text">${markdown(content)}${m.edited_at ? ' <span class="edited">(edited)</span>' : ''}</div>` : ''}
-    ${atts.length ? `<div class="attach">${atts.map((x) => x.type?.startsWith('image') || x.gif ? `<img src="${esc(x.url)}" alt="${esc(x.name || 'image')}" data-light loading="lazy">` :
+    ${m.poll ? pollHtml(m) : ''}
+    ${atts.length ? `<div class="attach">${atts.map((x) => x.sticker ? `<img class="sticker" src="${esc(x.url)}" alt="${esc(x.name || 'sticker')}">` : x.type?.startsWith('image') || x.gif ? `<img src="${esc(x.url)}" alt="${esc(x.name || 'image')}" data-light loading="lazy">` :
       x.type?.startsWith('video') ? `<video src="${esc(x.url)}" controls preload="metadata"></video>` : x.type?.startsWith('audio') ? `<audio src="${esc(x.url)}" controls></audio>` :
       `<a class="file" href="${esc(x.url)}" target="_blank" download>📄 <span>${esc(x.name)}</span></a>`).join('')}</div>` : ''}
-    ${m.reactions.length ? `<div class="reacts">${m.reactions.map((r) => `<button class="react ${r.users.includes(S.me.id) ? 'mine' : ''}" data-react="${esc(r.emoji)}" title="${esc(r.users.map((u) => S.users[u]?.display_name || 'someone').join(', '))}">${esc(r.emoji)} ${r.users.length}</button>`).join('')}</div>` : ''}</div>
-    <div class="msg-tools"><button data-t="react" title="Add reaction">😀</button><button data-t="reply" title="Reply">↩️</button>${m.author_id === S.me.id ? '<button data-t="edit" title="Edit">✏️</button>' : ''}<button data-t="more" title="More">⋯</button></div>`;
+    ${m.reactions.length ? `<div class="reacts">${m.reactions.map((r) => `<button class="react ${r.users.includes(S.me.id) ? 'mine' : ''}" data-react="${esc(r.emoji)}" title="${esc(r.users.map((u) => S.users[u]?.display_name || 'someone').join(', '))}">${esc(r.emoji)} ${r.users.length}</button>`).join('')}</div>` : ''}
+    ${m.thread_count ? `<button class="thread-link" data-t="thread">🧵 ${m.thread_count} ${m.thread_count === 1 ? 'reply' : 'replies'} ›</button>` : ''}</div>
+    <div class="msg-tools"><button data-t="react" title="Add reaction">😀</button><button data-t="reply" title="Reply">↩️</button>${m.thread_id ? '' : '<button data-t="thread" title="Thread">🧵</button>'}${m.author_id === S.me.id ? '<button data-t="edit" title="Edit">✏️</button>' : ''}<button data-t="more" title="More">⋯</button></div>`;
   return el;
 }
 $('#messages').addEventListener('click', (e) => {
@@ -311,7 +336,16 @@ $('#messages').addEventListener('click', (e) => {
   if (t.dataset.t === 'reply') setReply(m);
   if (t.dataset.t === 'edit') editMessage(m);
   if (t.dataset.t === 'more') messageMenu(m, e.clientX, e.clientY);
+  if (t.dataset.t === 'thread') window.ZT?.open(m);
 });
+$('#messages').addEventListener('click', (e) => { const v = e.target.closest('[data-vote]'); if (!v) return; const mEl = v.closest('[data-mid]');
+  tryRun(() => api(`/messages/${mEl.dataset.mid}/vote`, { body: { option: +v.dataset.vote } })); }, true);
+function pollHtml(m) {
+  const p = m.poll; const tot = p.total || 0;
+  return `<div class="poll"><div class="poll-q">📊 ${esc(p.question)}</div>${p.options.map((o, i) => { const n = p.votes[i].length; const pct = tot ? Math.round(n * 100 / tot) : 0; const mine = p.votes[i].includes(S.me.id);
+    return `<button class="poll-opt ${mine ? 'mine' : ''}" data-vote="${i}"><span class="bar" style="width:${pct}%"></span><span class="lbl">${mine ? '✅ ' : ''}${esc(o)}</span><span class="pct">${n} · ${pct}%</span></button>`; }).join('')}
+    <div class="small muted">${tot} ${tot === 1 ? 'vote' : 'votes'}${p.multi ? ' · pick as many as you like' : ''}</div></div>`;
+}
 function messageMenu(m, x, y) {
   const s = curServer(); const mod = s && ['owner', 'admin'].includes(s.my_role); const mine = m.author_id === S.me.id;
   menu(x, y, [['↩️ Reply', () => setReply(m)], mine && ['✏️ Edit', () => editMessage(m)], ['📋 Copy text', () => navigator.clipboard?.writeText(m.content)],
@@ -341,6 +375,21 @@ input.addEventListener('keydown', (e) => {
 });
 input.addEventListener('paste', (e) => { const files = [...(e.clipboardData?.files || [])]; if (files.length) { e.preventDefault(); addFiles(files); } });
 $('#send-btn').onclick = () => send();
+$('#plus-btn').onclick = (e) => { e.stopPropagation(); menu(e.clientX, e.clientY - 200, [['📎 Upload a file', () => $('#file-input').click()], ['📊 Create a poll', () => pollModal()], ['🎟️ Send a sticker', () => stickerPicker(e.clientX, e.clientY)]]); };
+function pollModal() {
+  const m = modal(`<h2>📊 Create a poll</h2><form id="pl"><label>Question<input name="q" required maxlength="300" placeholder="What should we play tonight?"></label><div id="pl-opts"></div>
+    <button type="button" class="btn sm" id="pl-add">+ Add answer</button><label style="flex-direction:row;align-items:center;gap:8px;display:flex;margin-top:10px"><input type="checkbox" name="multi" style="width:auto"> Allow multiple answers</label><div class="row"><button class="btn primary">Post poll</button></div></form>`);
+  const add = () => { if ($('#pl-opts', m).children.length >= 10) return; const i = document.createElement('input'); i.placeholder = 'Answer ' + ($('#pl-opts', m).children.length + 1); i.maxLength = 100; i.style.marginTop = '6px'; $('#pl-opts', m).appendChild(i); };
+  add(); add(); $('#pl-add', m).onclick = add;
+  $('#pl', m).onsubmit = (e) => { e.preventDefault(); const options = [...$('#pl-opts', m).querySelectorAll('input')].map((i) => i.value.trim()).filter(Boolean);
+    tryRun(async () => { await api('/messages', { body: { poll: { question: e.target.q.value, options, multi: e.target.multi.checked }, channel_id: S.view.channel, dm_id: S.view.dm } }); closeModal(); }); };
+}
+function stickerPicker(x, y, cb) {
+  const st = (S.emojis || []).filter((e) => e.kind === 'sticker');
+  showPop(`<div class="sticker-grid">${st.map((e) => `<button data-st="${e.id}" title="${esc(e.name)}"><img src="${esc(e.url)}"></button>`).join('')}</div>`, x - 290, y - 340, 'emoji');
+  $('#popover').querySelectorAll('[data-st]').forEach((b) => (b.onclick = () => { const e = st.find((s0) => s0.id === b.dataset.st); hidePop();
+    const att = [{ url: e.url, name: e.name, type: 'image/sticker', sticker: true }]; if (cb) cb(att); else send({ attachments: att }); }));
+}
 $('#file-input').onchange = (e) => { addFiles([...e.target.files]); e.target.value = ''; };
 $('#chat').addEventListener('dragover', (e) => e.preventDefault()); $('#chat').addEventListener('drop', (e) => { e.preventDefault(); addFiles([...e.dataTransfer.files]); });
 function addFiles(files) { for (const f of files.slice(0, 10)) S.pending.push({ file: f, url: URL.createObjectURL(f) }); renderPending(); }
@@ -369,8 +418,9 @@ function mentionSuggest() {
 // ---------- emoji / gif pickers ----------
 const EMOJI = '😀 😂 🤣 😊 😍 🥰 😘 😎 🤩 🥳 😏 😢 😭 😡 🤯 😱 🤔 🙄 😴 🤤 🤡 💀 👻 👽 🤖 💩 👍 👎 👏 🙌 🙏 💪 👀 🫡 🤝 ✌️ 👋 ❤️ 🧡 💛 💚 💙 💜 🖤 💔 💯 🔥 ✨ ⭐ 🎉 🎊 🎁 🏆 ⚽ 🎮 🎧 🎵 📸 💻 📱 ☕ 🍕 🍔 🍟 🌮 🍩 🍪 🍿 🥤 🐶 🐱 🐸 🦊 🐼 🐵 🦄 🐍 🌈 ☀️ 🌙 ⚡ ❄️ 🌸 🍀 ✅ ❌ ❓ ❗ 💬 🗿 🇮🇷'.split(' ');
 function emojiPicker(x, y, cb) {
-  showPop(`<div class="emoji-grid">${EMOJI.map((e) => `<button>${e}</button>`).join('')}</div>`, x - 290, y - 320, 'emoji');
-  $('#popover').querySelectorAll('button').forEach((b) => (b.onclick = () => { cb(b.textContent); hidePop(); }));
+  const custom = (S.emojis || []).filter((e) => e.kind === 'emoji');
+  showPop(`<div class="emoji-grid">${custom.map((e) => `<button data-ce=":${esc(e.name)}:" title=":${esc(e.name)}:"><img class="cemoji" src="${esc(e.url)}"></button>`).join('')}${EMOJI.map((e) => `<button>${e}</button>`).join('')}</div>`, x - 290, y - 320, 'emoji');
+  $('#popover').querySelectorAll('button').forEach((b) => (b.onclick = () => { cb(b.dataset.ce || b.textContent); hidePop(); }));
 }
 $('#emoji-btn').onclick = (e) => { e.stopPropagation(); emojiPicker(e.clientX, e.clientY, (em) => { input.value += em; input.focus(); }); };
 $('#gif-btn').onclick = (e) => { e.stopPropagation(); gifPicker(e.clientX, e.clientY); };
@@ -405,9 +455,10 @@ async function profilePopover(uid, x, y) {
   const u = await api('/users/' + uid).catch(() => null); if (!u) return; cacheUser(u);
   const me = u.id === S.me.id; const fr = S.friends.find((f) => f.user.id === u.id);
   showPop(`<div class="profile-card"><div class="banner" style="background:${u.banner ? `url('${esc(u.banner)}') center/cover` : esc(u.banner_color)}"></div>
-    <div class="pc-body">${avatar(u, 88, true)}<div class="pc-inner${plateClass(u)}"><h3>${esc(u.display_name)} ${u.is_bot ? '<span class="tag">BOT</span>' : ''}</h3><div class="muted">@${esc(u.username)}${u.pronouns ? ' • ' + esc(u.pronouns) : ''}</div>
+    <div class="pc-body">${avatar(u, 88, true)}<div class="pc-inner${plateClass(u)}"><h3 class="${u.name_font ? 'font-' + esc(u.name_font) : ''}">${esc(u.display_name)} ${u.is_bot ? '<span class="tag">BOT</span>' : ''}</h3><div class="muted">@${esc(u.username)}${u.pronouns ? ' • ' + esc(u.pronouns) : ''}</div>
     ${u.custom_status ? `<div style="margin-top:6px">${esc(u.custom_status)}</div>` : ''}
     ${u.bio ? `<div class="side-cat" style="padding-left:0">About me</div><div class="small" style="white-space:pre-wrap">${markdown(u.bio)}</div>` : ''}
+    ${u.connections?.length ? `<div class="side-cat" style="padding-left:0">Connections</div><div class="conns">${u.connections.map((c) => `<span class="conn">${CONN_ICONS[c.type] || '🔗'} ${esc(c.name)}</span>`).join('')}</div>` : ''}
     <div class="side-cat" style="padding-left:0">Member since</div><div class="small">${new Date(u.created_at).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })}</div>
     ${u.mutual_servers?.length && !me ? `<div class="side-cat" style="padding-left:0">Mutual servers — ${u.mutual_servers.length}</div>` : ''}</div>
     <div class="row" style="justify-content:flex-start">${me ? '<button class="btn primary sm" id="pp-edit">Edit Profile</button>' :
@@ -441,7 +492,7 @@ $('#members').addEventListener('contextmenu', (e) => {
 // server modals
 function serverMenu(s, x, y) {
   const admin = ['owner', 'admin'].includes(s.my_role);
-  menu(x, y, [['📨 Invite people', () => inviteModal(s)], admin && ['⚙️ Server settings', () => serverSettingsModal(s)], admin && ['➕ Create channel', () => createChannelModal(s)],
+  menu(x, y, [['📨 Invite people', () => inviteModal(s)], admin && ['⚙️ Server settings', () => serverSettingsModal(s)], admin && ['➕ Create channel', () => createChannelModal(s)], ['📅 Events', () => window.ZE?.open(s)], admin && ['😀 Emoji & stickers', () => emojiAdminModal(s)],
     admin && S.bots.length && ['🤖 Add one of my bots', () => addBotToServerModal(s)], s.my_role === 'owner' && !s.is_official && ['🗑️ Delete server', () => confirm(`Delete ${s.name}? This can't be undone.`) && tryRun(async () => { await api('/servers/' + s.id, { method: 'DELETE' }); }), 'danger'],
     s.my_role !== 'owner' && ['🚪 Leave server', () => confirm('Leave ' + s.name + '?') && tryRun(async () => { await api(`/servers/${s.id}/leave`, { body: {} }); S.servers = S.servers.filter((x) => x.id !== s.id); openHome(); }), 'danger']]);
 }
@@ -488,10 +539,10 @@ function serverSettingsModal(s) {
     if (f.icon.files[0]) body.icon = await uploadOne(f.icon.files[0]); if (f.banner.files[0]) body.banner = await uploadOne(f.banner.files[0]);
     await api('/servers/' + s.id, { method: 'PATCH', body }); closeModal(); toast('Saved'); }); };
 }
-function createChannelModal(s) {
+function createChannelModal(s, preType) {
   const m = modal(`<h2>Create channel</h2><form id="cc"><label>Channel name<input name="name" required placeholder="new-channel"></label><label>Topic<input name="topic"></label>
-    <label>Type<select name="type"><option value="text"># Text — anyone can chat</option><option value="announcement">📢 Announcement — only admins post</option></select></label><div class="row"><button class="btn primary">Create</button></div></form>`);
-  $('#cc', m).onsubmit = (e) => { e.preventDefault(); tryRun(async () => { const c = await api(`/servers/${s.id}/channels`, { body: Object.fromEntries(new FormData(e.target)) }); closeModal(); setTimeout(() => openChannel(s.id, c.id), 200); }); };
+    <label>Type<select name="type"><option value="text"># Text — anyone can chat</option><option value="announcement">📢 Announcement — only admins post</option><option value="voice" ${preType === 'voice' ? 'selected' : ''}>🔊 Voice — talk, video, screen share</option></select></label><div class="row"><button class="btn primary">Create</button></div></form>`);
+  $('#cc', m).onsubmit = (e) => { e.preventDefault(); tryRun(async () => { const c = await api(`/servers/${s.id}/channels`, { body: Object.fromEntries(new FormData(e.target)) }); closeModal(); if (c.type !== 'voice') setTimeout(() => openChannel(s.id, c.id), 200); }); };
 }
 function editChannelModal(s, c) {
   const m = modal(`<h2>Edit #${esc(c.name)}</h2><form id="ec"><label>Name<input name="name" value="${esc(c.name)}"></label><label>Topic<input name="topic" value="${esc(c.topic || '')}"></label>
@@ -580,7 +631,7 @@ function addBotToServerModal(s) {
 // settings
 function settingsModal(tab = 'profile') {
   const u = S.me; const colors = ['#5865f2', '#7c5cff', '#eb459e', '#ed4245', '#f97316', '#f0b232', '#57f287', '#06b6d4', '#0f172a', '#ffffff'];
-  const m = modal(`<h2>⚙️ Settings</h2><div class="tabs">${['profile', 'account', 'appearance', 'notifications'].map((t) => `<button data-tab="${t}" class="${t === tab ? 'on' : ''}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div><div id="set-body"></div>
+  const m = modal(`<h2>⚙️ Settings</h2><div class="tabs">${['profile', 'account', 'appearance', 'notifications', 'voice', 'get the app'].map((t) => `<button data-tab="${t}" class="${t === tab ? 'on' : ''}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div><div id="set-body"></div>
     <div class="row" style="justify-content:space-between"><button class="btn danger" id="logout">Log out</button></div>`, 'wide');
   const body = $('#set-body', m);
   const draw = (t) => {
@@ -589,20 +640,27 @@ function settingsModal(tab = 'profile') {
       body.innerHTML = `<div style="display:flex;gap:20px;flex-wrap:wrap"><form id="pf" style="flex:1;min-width:260px"><label>Display name<input name="display_name" value="${esc(u.display_name)}" maxlength="32"></label>
         <label>Pronouns<input name="pronouns" value="${esc(u.pronouns || '')}" maxlength="40"></label><label>Custom status<input name="custom_status" value="${esc(u.custom_status || '')}" placeholder="🎮 Playing Roblox"></label>
         <label>About me<textarea name="bio" rows="3" maxlength="400">${esc(u.bio || '')}</textarea></label><label>Avatar (images or GIFs, free)<input type="file" name="avatar" accept="image/*"></label>
-        <label>Banner (images or GIFs, free)<input type="file" name="banner" accept="image/*"></label><label>Banner color<div class="color-row">${colors.map((c) => `<button type="button" data-color="${c}" style="background:${c}" class="${u.banner_color === c ? 'on' : ''}"></button>`).join('')}</div></label>
+        <label>Banner (images or GIFs, free)<input type="file" name="banner" accept="image/*"></label><label>Name font (free)<select name="name_font"><option value="">Default</option>${NAME_FONTS.map((f) => `<option value="${f[0]}" ${u.name_font === f[0] ? 'selected' : ''}>${f[1]}</option>`).join('')}</select></label>
+        <label>Connections <span class="small muted">(shown on your profile)</span><div id="conn-list"></div><button type="button" class="btn sm" id="conn-add" style="margin-top:6px">+ Add connection</button></label>
+        <label>Banner color<div class="color-row">${colors.map((c) => `<button type="button" data-color="${c}" style="background:${c}" class="${u.banner_color === c ? 'on' : ''}"></button>`).join('')}</div></label>
         <div class="row" style="justify-content:flex-start">${u.avatar ? '<button type="button" class="btn sm" id="rm-av">Remove avatar</button>' : ''}${u.banner ? '<button type="button" class="btn sm" id="rm-bn">Remove banner</button>' : ''}<button type="button" class="btn sm" id="go-shop">🛍️ Decorations & plates</button></div>
         <div class="row"><button class="btn primary">Save changes</button></div></form><div id="pf-prev"></div></div>`;
       const prev = () => { $('#pf-prev').innerHTML = `<div class="side-cat">Preview</div><div class="profile-card"><div class="banner" style="background:${u.banner ? `url('${esc(u.banner)}') center/cover` : esc(u.banner_color)}"></div><div class="pc-body">${avatar(u, 88, true)}<div class="pc-inner${plateClass(u)}"><h3>${esc(u.display_name)}</h3><div class="muted">@${esc(u.username)}</div><div class="small">${esc(u.bio || '')}</div></div></div></div>`; };
       prev(); let color = u.banner_color;
       body.querySelectorAll('[data-color]').forEach((b) => (b.onclick = () => { color = b.dataset.color; body.querySelectorAll('[data-color]').forEach((x) => x.classList.toggle('on', x === b)); }));
       $('#go-shop') .onclick = () => shopModal();
+      const connRow = (c = { type: 'youtube', name: '' }) => { const d0 = document.createElement('div'); d0.className = 'conn-row'; d0.innerHTML = `<select>${Object.keys(CONN_ICONS).map((k) => `<option value="${k}" ${c.type === k ? 'selected' : ''}>${CONN_ICONS[k]} ${k}</option>`).join('')}</select><input placeholder="your name there" value="${esc(c.name)}" maxlength="60"><button type="button" class="btn sm">✕</button>`; d0.querySelector('button').onclick = () => d0.remove(); $('#conn-list').appendChild(d0); };
+      (u.connections || []).forEach(connRow); $('#conn-add').onclick = () => connRow();
       const patch = async (bd) => { const nu = await api('/me', { method: 'PATCH', body: bd }); Object.assign(S.me, nu); cacheUser(nu); renderMe(); draw('profile'); toast('Saved'); };
       $('#rm-av') && ($('#rm-av').onclick = () => tryRun(() => patch({ avatar: null }))); $('#rm-bn') && ($('#rm-bn').onclick = () => tryRun(() => patch({ banner: null })));
-      $('#pf').onsubmit = (e) => { e.preventDefault(); tryRun(async () => { const f = e.target; const bd = { display_name: f.display_name.value, pronouns: f.pronouns.value, custom_status: f.custom_status.value, bio: f.bio.value, banner_color: color };
+      $('#pf').onsubmit = (e) => { e.preventDefault(); tryRun(async () => { const f = e.target; const bd = { display_name: f.display_name.value, pronouns: f.pronouns.value, custom_status: f.custom_status.value, bio: f.bio.value, banner_color: color, name_font: f.name_font.value || null,
+          connections: [...body.querySelectorAll('.conn-row')].map((r) => ({ type: r.querySelector('select').value, name: r.querySelector('input').value.trim() })).filter((c) => c.name) };
         if (f.avatar.files[0]) bd.avatar = await uploadOne(f.avatar.files[0]); if (f.banner.files[0]) bd.banner = await uploadOne(f.banner.files[0]); await patch(bd); }); };
     }
     if (t === 'account') {
-      body.innerHTML = `<p>Username: <b>@${esc(u.username)}</b><br>Email: <b>${esc(u.email || '')}</b></p><form id="pw"><label>Current password<input type="password" name="current_password" required></label><label>New password<input type="password" name="new_password" minlength="6" required></label><div class="row"><button class="btn primary">Change password</button></div></form>`;
+      body.innerHTML = `<p>Username: <b>@${esc(u.username)}</b><br>Email: <b>${esc(u.email || '')}</b></p><form id="pw"><label>Current password<input type="password" name="current_password" required></label><label>New password<input type="password" name="new_password" minlength="6" required></label><div class="row"><button class="btn primary">Change password</button></div></form>
+        <div class="side-cat" style="padding-left:0;color:var(--red)">Danger zone</div><form id="delacc"><label>Type your password to delete your account forever<input type="password" name="password" required></label><div class="row"><button class="btn danger">Delete account</button></div></form>`;
+      $('#delacc').onsubmit = (e) => { e.preventDefault(); if (!confirm('Delete your Zuno account forever? Your messages will show as Deleted User.')) return; tryRun(async () => { await api('/me/delete', { body: { password: e.target.password.value } }); closeModal(); toast('Account deleted'); logout(); }); };
       $('#pw').onsubmit = (e) => { e.preventDefault(); tryRun(async () => { await api('/me', { method: 'PATCH', body: Object.fromEntries(new FormData(e.target)) }); e.target.reset(); toast('Password changed'); }); };
     }
     if (t === 'appearance') {
@@ -610,12 +668,38 @@ function settingsModal(tab = 'profile') {
       body.querySelectorAll('[data-theme]').forEach((b) => (b.onclick = () => tryRun(async () => { await api('/me', { method: 'PATCH', body: { theme: b.dataset.theme } }); S.me.theme = b.dataset.theme; document.body.classList.toggle('light', b.dataset.theme === 'light'); })));
     }
     if (t === 'notifications') {
-      body.innerHTML = `<p class="muted">Get desktop notifications for DMs and @mentions when Zuno isn't focused.</p><button class="btn primary" id="notif">Turn on notifications</button>`;
-      $('#notif').onclick = () => Notification?.requestPermission().then((p) => toast(p === 'granted' ? 'Notifications on' : 'Notifications blocked by your browser'));
+      const sp = Z.prefs();
+      body.innerHTML = `<p class="muted">Get notifications for DMs and @mentions when Zuno isn't open.</p><button class="btn primary" id="notif">Turn on notifications</button>
+        <div class="side-cat" style="padding-left:0">Sounds</div>${[['message', 'New message & DM'], ['mention', '@mention'], ['voice', 'Join, leave, mute & deafen'], ['ring', 'Call ringtone']].map(([k, l]) => `<label class="switch-row"><span>${l}</span><input type="checkbox" data-snd="${k}" ${sp[k] !== false ? 'checked' : ''}><button type="button" class="btn sm" data-try="${k}">▶ Test</button></label>`).join('')}
+        <label>Volume<input type="range" min="0" max="100" value="${Math.round((sp.volume ?? 0.6) * 100)}" id="snd-vol"></label>`;
+      body.querySelectorAll('[data-snd]').forEach((c) => (c.onchange = () => Z.setPref(c.dataset.snd, c.checked)));
+      body.querySelectorAll('[data-try]').forEach((b) => (b.onclick = () => { const k = b.dataset.try; if (k === 'ring') { Z.ring(true); setTimeout(() => Z.ring(false), 2500); } else Z.sound(k === 'voice' ? 'join' : k, true); }));
+      $('#snd-vol').oninput = (e) => Z.setPref('volume', e.target.value / 100);
+      $('#notif').onclick = () => window.ZunoAndroid ? (ZunoAndroid.askNotify?.(), toast('Notifications on')) : window.Notification?.requestPermission().then((p) => toast(p === 'granted' ? 'Notifications on' : 'Notifications blocked by your browser'));
+    }
+    if (t === 'voice') window.ZV?.settings(body);
+    if (t === 'get the app') {
+      body.innerHTML = `<div class="dl-grid"><div class="dl"><div style="font-size:34px">🤖</div><b>Android</b><p class="small muted">Download the APK, then allow "install unknown apps" when asked.</p><a class="btn primary" href="https://github.com/arazJjj/Zuno-opensource-discord-clone/releases/latest" target="_blank">Download for Android</a></div>
+        <div class="dl"><div style="font-size:34px">🍎</div><b>iPhone & iPad</b><p class="small muted">Open Zuno in Safari, tap Share, then "Add to Home Screen".</p></div>
+        <div class="dl"><div style="font-size:34px">💻</div><b>Windows, Mac & Linux</b><p class="small muted">In Chrome or Edge, click the install icon in the address bar to get Zuno as an app.</p><button class="btn" id="pwa-btn">Install app</button></div></div>
+        <p class="small muted">Zuno is free and open source. <a href="https://github.com/arazJjj/Zuno-opensource-discord-clone" target="_blank">See the code</a></p>`;
+      $('#pwa-btn').onclick = () => { if (window._pwa) { window._pwa.prompt(); } else toast('Use your browser menu → Install Zuno'); };
     }
   };
   m.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => draw(b.dataset.tab))); draw(tab);
   $('#logout', m).onclick = () => { closeModal(); logout(); };
+}
+
+const NAME_FONTS = [['comic', 'Comic'], ['mono', 'Mono'], ['serif', 'Serif'], ['round', 'Rounded'], ['bold', 'Heavy'], ['script', 'Script'], ['pixel', 'Pixel'], ['wide', 'Wide']];
+const CONN_ICONS = { youtube: '▶️', twitch: '🟣', roblox: '🟥', minecraft: '⛏️', steam: '🎮', github: '🐙', spotify: '🎵', instagram: '📸', tiktok: '🎶', x: '✖️', website: '🌐' };
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); window._pwa = e; });
+async function emojiAdminModal(s) {
+  const list = (S.emojis || []).filter((e) => e.server_id === s.id);
+  const m = modal(`<h2>😀 Emoji & stickers — ${esc(s.name)}</h2><p class="small muted">Upload images or GIFs. Use emoji as :name: in messages. Stickers show in the ＋ menu.</p>
+    <form id="em"><div class="row" style="gap:8px;flex-wrap:wrap;justify-content:flex-start"><input name="name" placeholder="name" required maxlength="32" style="flex:1;min-width:120px"><select name="kind" style="width:auto"><option value="emoji">Emoji</option><option value="sticker">Sticker</option></select><input type="file" name="file" accept="image/*" required style="flex:2;min-width:160px"><button class="btn primary">Add</button></div></form>
+    <div class="em-list">${list.map((e) => `<div class="em-item"><img src="${esc(e.url)}"><span>${e.kind === 'emoji' ? ':' + esc(e.name) + ':' : esc(e.name) + ' (sticker)'}</span><button class="btn sm danger" data-del="${e.id}">✕</button></div>`).join('') || '<p class="muted small">No custom emoji yet.</p>'}</div>`, 'wide');
+  $('#em', m).onsubmit = (e) => { e.preventDefault(); tryRun(async () => { const f = e.target; const url = await uploadOne(f.file.files[0]); await api(`/servers/${s.id}/emojis`, { body: { name: f.name.value, kind: f.kind.value, url } }); S.emojis = await api('/emojis'); emojiAdminModal(s); toast('Added'); }); };
+  m.querySelectorAll('[data-del]').forEach((b) => (b.onclick = () => tryRun(async () => { await api('/emojis/' + b.dataset.del, { method: 'DELETE' }); S.emojis = await api('/emojis'); emojiAdminModal(s); })));
 }
 
 // invite links: /invite/CODE

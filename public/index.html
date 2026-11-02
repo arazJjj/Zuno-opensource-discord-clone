@@ -47,6 +47,7 @@
   <aside class="sidebar" id="sidebar">
     <header class="side-head" id="side-head"></header>
     <div class="side-body" id="side-body"></div>
+    <div id="voice-bar" class="voice-bar hidden"></div>
     <footer class="me-bar" id="me-bar"></footer>
   </aside>
 
@@ -60,7 +61,7 @@
           <div class="reply-bar hidden" id="reply-bar"></div>
           <div class="upload-preview" id="upload-preview"></div>
           <div class="composer-row">
-            <label class="icon-btn" title="Upload"><input type="file" id="file-input" multiple hidden>＋</label>
+            <input type="file" id="file-input" multiple hidden><button class="icon-btn" id="plus-btn" title="Upload, poll, sticker">＋</button>
             <textarea id="input" rows="1" placeholder="Message"></textarea>
             <button class="icon-btn" id="gif-btn" title="GIFs">GIF</button>
             <button class="icon-btn" id="emoji-btn" title="Emoji">😊</button>
@@ -68,16 +69,21 @@
           </div>
         </div>
       </section>
+      <aside class="thread-panel hidden" id="thread-panel"></aside>
       <aside class="members" id="members"></aside>
     </div>
   </main>
 </div>
 
+<div id="call-stage" class="call-stage hidden"></div>
 <div id="popover" class="popover hidden"></div>
 <div id="modal-root"></div>
 <div id="toast" class="toast hidden"></div>
 
 <script src="/socket.io/socket.io.js"></script>
+<script src="/sounds.js"></script>
 <script src="/app.js"></script>
+<script src="/voice.js"></script>
+<script src="/extras.js"></script>
 </body>
 </html>
