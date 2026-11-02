@@ -87,11 +87,13 @@ window.ZV = (() => {
     if (V.room === room) { openStage(); return; }
     if (!window.RTCPeerConnection || !navigator.mediaDevices?.getUserMedia) return toast('Your browser does not support calls. Try Chrome or the Zuno app.');
     if (V.room) leave(true);
-    try { V.mic = await getMic(); } catch (e) { return toast('Microphone blocked. Allow mic access to join voice.'); }
+    toast('Connecting to ' + name + '…');
+    try { V.mic = await Promise.race([getMic(), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000))]); }
+    catch (e) { V.mic = null; toast('No microphone access, joining to listen only. Allow the mic and rejoin to talk.'); }
     if (!V.ice) V.ice = await api('/ice').catch(() => null);
-    V.room = room; V.roomName = name; V.muted = false; V.deaf = false; V.activity = null;
-    watchLevel(S.me.id, V.mic);
-    sock.emit('voice:join', { room });
+    V.room = room; V.roomName = name; V.muted = !V.mic; V.deaf = false; V.activity = null;
+    if (V.mic) watchLevel(S.me.id, V.mic);
+    sock.emit('voice:join', { room }); if (!V.mic) setTimeout(sendState, 300);
     Z.sound('join'); V.stageOpen = true;
     if (opts.video) setTimeout(() => toggleCam(), 300);
     render();
@@ -107,6 +109,7 @@ window.ZV = (() => {
   }
   function toggleMute() {
     if (V.deaf) return toggleDeaf();
+    if (!V.mic) return toast('No microphone. Allow mic access, then leave and rejoin.');
     V.muted = !V.muted; V.mic?.getAudioTracks().forEach((t) => (t.enabled = !V.muted)); Z.sound(V.muted ? 'mute' : 'unmute'); sendState(); render();
   }
   function toggleDeaf() {
