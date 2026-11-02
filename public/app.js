@@ -276,7 +276,7 @@ function renderFriends() {
     `<div class="welcome" style="text-align:center"><img src="/logo.svg" width="96"><p class="muted">${tab === 'online' ? "No one's around to play with Wumpus... just kidding, there's no Wumpus here. Add some friends!" : 'Nothing here yet.'}</p></div>`}</div>`;
   box.querySelectorAll('[data-fa]').forEach((b) => (b.onclick = () => tryRun(async () => { const uid = b.closest('[data-uid]').dataset.uid; if (b.dataset.fa === 'msg') return startDm(uid); await api(`/friends/${uid}/${b.dataset.fa}`, { body: {} }); })));
 }
-async function startDm(uid) { const d = await api('/dms', { body: { user_ids: [uid] } }); if (!S.dms.find((x) => x.id === d.id)) S.dms.unshift(d); d.members.forEach(cacheUser); closeModal(); hidePop(); openDm(d.id); }
+async function startDm(uid) { const d = await api('/dms', { body: { user_ids: [uid] } }); if (!d?.id) return toast('Could not open that DM'); if (!S.dms.find((x) => x.id === d.id)) S.dms.unshift(d); (d.members || []).forEach(cacheUser); closeModal(); hidePop(); openDm(d.id); }
 
 // ---------- messages ----------
 function renderMessages() {
@@ -362,7 +362,7 @@ function editMessage(m) {
   ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
   const done = () => { box.remove(); if (old) old.style.display = ''; };
   const save = () => { const v = ta.value.trim(); if (!v || v === m.content) return done(); tryRun(async () => { await api('/messages/' + m.id, { method: 'PATCH', body: { content: v } }); done(); }); };
-  ta.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape' || e.key === 'Esc') { e.preventDefault(); done(); } else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save(); } });
+  ta.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape' || e.key === 'Esc') { e.preventDefault(); done(); } else if ((e.key === 'Enter' || e.keyCode === 13) && !e.shiftKey && !e.isComposing) { e.preventDefault(); save(); } });
   box.querySelector('[data-ed="cancel"]').onclick = (e) => { e.preventDefault(); done(); };
   box.querySelector('[data-ed="save"]').onclick = (e) => { e.preventDefault(); save(); };
 }

@@ -524,7 +524,7 @@ function openDm(a, b) {
 app.post('/api/dms', auth, (req, res) => {
   const ids = [...new Set((req.body.user_ids || []).filter((x) => x !== req.user.id && getUser(x)))];
   if (!ids.length) return err(res, 'Pick at least one person');
-  if (ids.length === 1 && !req.body.group) return res.json(listDms(req.user.id).find((d) => d.id === openDm(req.user.id, ids[0]).id));
+  if (ids.length === 1 && !req.body.group) { const did = openDm(req.user.id, ids[0]).id; return res.json(listDms(req.user.id).find((d) => d.id === did)); }
   if (ids.length > 9) return err(res, 'Group DMs hold up to 10 people');
   const did = id();
   db.prepare('INSERT INTO dms(id,name,is_group,owner_id,created_at) VALUES(?,?,1,?,?)').run(did, String(req.body.name || '').slice(0, 50) || null, req.user.id, now());
