@@ -1,5 +1,5 @@
 plugins { id 'com.android.application' }
-def zunoUrl = System.getenv("ZUNO_URL") ?: "https://zuno.onrender.com"
+def zunoUrl = System.getenv("ZUNO_URL") ?: "https://zuno-n6rd.onrender.com"
 android {
     namespace 'site.zuno.app'
     compileSdk 34
