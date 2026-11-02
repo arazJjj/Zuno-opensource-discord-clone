@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS reads(user_id TEXT, target_id TEXT, last_read INTEGER
 
 // ---------- 1.1 migrations ----------
 for (const sql of ['ALTER TABLE messages ADD COLUMN thread_id TEXT', 'ALTER TABLE messages ADD COLUMN poll TEXT', 'ALTER TABLE messages ADD COLUMN thread_name TEXT',
-  'ALTER TABLE users ADD COLUMN name_font TEXT', "ALTER TABLE users ADD COLUMN connections TEXT DEFAULT '[]'"]) { try { db.exec(sql); } catch {} }
+  'ALTER TABLE users ADD COLUMN name_font TEXT', 'ALTER TABLE users ADD COLUMN profile_frame TEXT', "ALTER TABLE users ADD COLUMN connections TEXT DEFAULT '[]'"]) { try { db.exec(sql); } catch {} }
 db.exec(`
 CREATE TABLE IF NOT EXISTS poll_votes(message_id TEXT, user_id TEXT, opt INTEGER, PRIMARY KEY(message_id,user_id,opt));
 CREATE TABLE IF NOT EXISTS emojis(id TEXT PRIMARY KEY, server_id TEXT, name TEXT, url TEXT, kind TEXT DEFAULT 'emoji', creator TEXT, created_at INTEGER);
@@ -68,12 +68,23 @@ const SHOP = [
   { id: 'deco-sakura', type: 'decoration', name: 'Sakura Petals', css: 'sakura' },
   { id: 'deco-glitch', type: 'decoration', name: 'Glitch', css: 'glitch' },
   { id: 'deco-dragon', type: 'decoration', name: 'Red Dragon Eyes', css: 'dragon' },
+  { id: 'deco-angry', type: 'decoration', name: 'Angry', css: 'angry' },
+  { id: 'deco-wings', type: 'decoration', name: 'Dragon Wings', css: 'wings' },
+  { id: 'deco-eyes', type: 'decoration', name: 'Opening Eyes', css: 'eyes' },
+  { id: 'deco-skull', type: 'decoration', name: 'Skeleton Circle', css: 'skull' },
   { id: 'plate-galaxy', type: 'nameplate', name: 'Galaxy', css: 'galaxy' },
   { id: 'plate-sunset', type: 'nameplate', name: 'Sunset', css: 'sunset' },
   { id: 'plate-ocean', type: 'nameplate', name: 'Ocean', css: 'ocean' },
   { id: 'plate-forest', type: 'nameplate', name: 'Forest', css: 'forest' },
   { id: 'plate-candy', type: 'nameplate', name: 'Candy', css: 'candy' },
   { id: 'plate-matrix', type: 'nameplate', name: 'Matrix', css: 'matrix' },
+  { id: 'frame-dragon', type: 'profile_frame', name: 'Dragon Scale', css: 'dragon' },
+  { id: 'frame-bone', type: 'profile_frame', name: 'Bone Yard', css: 'bone' },
+  { id: 'frame-galaxy', type: 'profile_frame', name: 'Galaxy', css: 'galaxy' },
+  { id: 'frame-gold', type: 'profile_frame', name: 'Royal Gold', css: 'gold' },
+  { id: 'frame-neon', type: 'profile_frame', name: 'Neon Pulse', css: 'neon' },
+  { id: 'frame-frost', type: 'profile_frame', name: 'Frost', css: 'frost' },
+  { id: 'frame-inferno', type: 'profile_frame', name: 'Inferno', css: 'inferno' },
 ];
 
 // ---------- seed: official server + Zuno Bot ----------
@@ -111,7 +122,7 @@ const publicUser = (u) => u && ({
   id: u.id, username: u.username, display_name: u.display_name, avatar: u.avatar, banner: u.banner,
   banner_color: u.banner_color, bio: u.bio, custom_status: u.custom_status, pronouns: u.pronouns,
   decoration: u.decoration, nameplate: u.nameplate, is_bot: !!u.is_bot, created_at: u.created_at,
-  name_font: u.name_font || null, connections: (() => { try { return JSON.parse(u.connections || '[]'); } catch { return []; } })(),
+  name_font: u.name_font || null, profile_frame: u.profile_frame || null, connections: (() => { try { return JSON.parse(u.connections || '[]'); } catch { return []; } })(),
   online: online.has(u.id) || !!u.is_bot,
 });
 const getUser = (uid) => db.prepare('SELECT * FROM users WHERE id=?').get(uid);
@@ -272,7 +283,7 @@ app.get('/api/bootstrap', auth, (req, res) => {
 
 // profile & settings
 app.patch('/api/me', auth, (req, res) => {
-  const allowed = ['display_name', 'bio', 'custom_status', 'pronouns', 'banner_color', 'avatar', 'banner', 'theme', 'decoration', 'nameplate', 'name_font'];
+  const allowed = ['display_name', 'bio', 'custom_status', 'pronouns', 'banner_color', 'avatar', 'banner', 'theme', 'decoration', 'nameplate', 'name_font', 'profile_frame'];
   if (Array.isArray(req.body.connections)) db.prepare('UPDATE users SET connections=? WHERE id=?').run(JSON.stringify(req.body.connections.slice(0, 8).map((c) => ({ type: String(c.type || '').slice(0, 20), name: String(c.name || '').slice(0, 60) })).filter((c) => c.name)), req.user.id);
   if (req.body.username != null && String(req.body.username).toLowerCase().trim() !== req.user.username) {
     const un = String(req.body.username).toLowerCase().trim();
@@ -283,7 +294,7 @@ app.patch('/api/me', auth, (req, res) => {
   const inv = db.prepare('SELECT item_id FROM inventory WHERE user_id=?').all(req.user.id).map((r) => r.item_id);
   for (const k of allowed) if (k in req.body) {
     let v = req.body[k] == null ? null : String(req.body[k]).slice(0, k === 'bio' ? 400 : 200);
-    if ((k === 'decoration' || k === 'nameplate') && v && !inv.includes(v)) return err(res, 'Get that item from the Shop first');
+    if ((k === 'decoration' || k === 'nameplate' || k === 'profile_frame') && v && !inv.includes(v)) return err(res, 'Get that item from the Shop first');
     db.prepare(`UPDATE users SET ${k}=? WHERE id=?`).run(v, req.user.id);
   }
   if (req.body.new_password) {

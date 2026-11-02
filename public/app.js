@@ -104,6 +104,7 @@ function avatar(u, size = 40, dot = false) {
   const inner = u.avatar ? `<img src="${esc(u.avatar)}" alt="">` : initials(u.display_name);
   return `<span class="av${deco}" style="width:${size}px;height:${size}px;font-size:${size * 0.38}px;background:${esc(u.banner_color || '#7c5cff')}">${inner}${dot ? `<span class="dot ${u.online ? 'on' : ''}"></span>` : ''}</span>`;
 }
+const frameClass = (u) => { u = S.users[u?.id] || u; const it = S.shop.find((s) => s.id === u?.profile_frame); return it ? ' framed frame-' + it.css : ''; };
 const plateClass = (u) => { u = S.users[u?.id] || u; const it = S.shop.find((s) => s.id === u?.nameplate); return it ? ' plate plate-' + it.css : ''; };
 const serverIcon = (s, size = 48) => s.icon ? `<img src="${esc(s.icon)}" alt="">` : `<span style="font-size:${size * 0.36}px">${initials(s.name)}</span>`;
 function fmtTime(t) { const d = new Date(t), n = new Date(); const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -461,7 +462,7 @@ async function uploadOne(file) { const fd = new FormData(); fd.append('files', f
 async function profilePopover(uid, x, y) {
   const u = await api('/users/' + uid).catch(() => null); if (!u) return; cacheUser(u);
   const me = u.id === S.me.id; const fr = S.friends.find((f) => f.user.id === u.id);
-  showPop(`<div class="profile-card"><div class="banner" style="background:${u.banner ? `url('${esc(u.banner)}') center/cover` : esc(u.banner_color)}"></div>
+  showPop(`<div class="profile-card${frameClass(u)}"><div class="banner" style="background:${u.banner ? `url('${esc(u.banner)}') center/cover` : esc(u.banner_color)}"></div>
     <div class="pc-body">${avatar(u, 88, true)}<div class="pc-inner${plateClass(u)}"><h3 class="${u.name_font ? 'font-' + esc(u.name_font) : ''}">${esc(u.display_name)} ${u.is_bot ? '<span class="tag">BOT</span>' : ''}</h3><div class="muted">@${esc(u.username)}${u.pronouns ? ' • ' + esc(u.pronouns) : ''}</div>
     ${u.custom_status ? `<div style="margin-top:6px">${esc(u.custom_status)}</div>` : ''}
     ${u.bio ? `<div class="side-cat" style="padding-left:0">About me</div><div class="small" style="white-space:pre-wrap">${markdown(u.bio)}</div>` : ''}
@@ -587,9 +588,9 @@ function searchModal() {
 // shop
 function shopModal() {
   const m = modal(`<h2>🛍️ Zuno Shop <span class="badge" style="background:var(--green);font-size:12px">EVERYTHING FREE</span></h2><p class="muted">Other apps charge for this. Here it's yours. Claim, then equip.</p>
-    <div class="tabs"><button class="on" data-st="decoration">Avatar decorations</button><button data-st="nameplate">Name plates</button></div><div class="grid" id="shop-grid"></div>`, 'wide');
+    <div class="tabs"><button class="on" data-st="decoration">Avatar decorations</button><button data-st="nameplate">Name plates</button><button data-st="profile_frame">Profile frames</button></div><div class="grid" id="shop-grid"></div>`, 'wide');
   const draw = (type) => { $('#shop-grid', m).innerHTML = S.shop.filter((i) => i.type === type).map((i) => { const owned = S.inventory.includes(i.id); const on = S.me[type] === i.id;
-    const prev = type === 'decoration' ? avatar({ ...S.me, decoration: i.id }, 64) : `<div class="plate-prev plate plate-${i.css}">${avatar({ ...S.me, decoration: null }, 28)} ${esc(S.me.display_name)}</div>`;
+    const prev = type === 'decoration' ? avatar({ ...S.me, decoration: i.id }, 64) : type === 'profile_frame' ? `<div class="frame-prev profile-card framed frame-${i.css}"><div class="banner" style="height:34px;background:${esc(S.me.banner_color || '#5865f2')}"></div><div style="padding:6px 8px;display:flex;gap:6px;align-items:center">${avatar({ ...S.me, decoration: null }, 26)}<b class="small">${esc(S.me.display_name)}</b></div></div>` : `<div class="plate-prev plate plate-${i.css}">${avatar({ ...S.me, decoration: null }, 28)} ${esc(S.me.display_name)}</div>`;
     return `<div class="shop-item"><div class="preview">${prev}</div><b>${esc(i.name)}</b><span class="small muted">Free</span>${!owned ? `<button class="btn primary sm" data-claim="${i.id}">Claim</button>` : on ? `<button class="btn sm" data-unequip="${type}">Unequip</button>` : `<button class="btn green sm" data-equip="${i.id}" data-type="${type}">Equip</button>`}</div>`; }).join('');
     m.querySelectorAll('[data-claim]').forEach((b) => (b.onclick = () => tryRun(async () => { await api(`/shop/${b.dataset.claim}/claim`, { body: {} }); S.inventory.push(b.dataset.claim); toast('Claimed! 🎉'); draw(type); })));
     m.querySelectorAll('[data-equip]').forEach((b) => (b.onclick = () => tryRun(async () => { const u = await api('/me', { method: 'PATCH', body: { [b.dataset.type]: b.dataset.equip } }); Object.assign(S.me, u); cacheUser(u); renderMe(); draw(type); })));
