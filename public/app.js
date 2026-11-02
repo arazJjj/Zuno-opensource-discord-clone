@@ -87,6 +87,7 @@ function connect() {
   window.ZV?.bind(socket); window.ZT?.bind(socket);
   socket.on('emojis:changed', async () => { S.emojis = await api('/emojis').catch(() => S.emojis); });
   socket.on('events:changed', ({ server_id }) => { if (S.view.server === server_id) window.ZE?.refresh(); });
+  socket.on('levelup', ({ level, server }) => { toast(`Level up! You reached level ${level} in ${server || 'this hub'}`); Z.sound?.('mention'); });
   socket.on('connect_error', (e) => { if (e.message === 'unauthorized') logout(); });
 }
 setInterval(() => { let ch = false; for (const k in S.typing) if (Date.now() - S.typing[k].at > 6000) { delete S.typing[k]; ch = true; } if (ch) renderTyping(); }, 2000);
@@ -104,7 +105,7 @@ function avatar(u, size = 40, dot = false) {
   u = u?._preview ? u : S.users[u?.id] || u || {};
   const deco = u.decoration ? ' ' + (S.shop.find((s) => s.id === u.decoration)?.css ? 'deco-' + S.shop.find((s) => s.id === u.decoration).css : '') : '';
   const inner = u.avatar ? `<img src="${esc(u.avatar)}" alt="">` : initials(u.display_name);
-  return `<span class="av${deco}" style="width:${size}px;height:${size}px;font-size:${size * 0.38}px;background:${esc(u.banner_color || '#7c5cff')}">${inner}${dot ? `<span class="dot ${u.online ? 'on' : ''}"></span>` : ''}</span>`;
+  return `<span class="av${deco}" style="width:${size}px;height:${size}px;font-size:${size * 0.38}px;background:${esc(u.banner_color || '#10b981')}">${inner}${dot ? `<span class="dot ${u.online ? 'on' : ''}"></span>` : ''}</span>`;
 }
 const frameClass = (u) => { u = S.users[u?.id] || u; const it = S.shop.find((s) => s.id === u?.profile_frame); return it ? ' framed frame-' + it.css : ''; };
 const plateClass = (u) => { u = S.users[u?.id] || u; const it = S.shop.find((s) => s.id === u?.nameplate); return it ? ' plate plate-' + it.css : ''; };
@@ -219,7 +220,7 @@ function renderDmList(filter) {
     <div class="side-cat"><span>Direct messages</span><button id="new-dm" title="New DM / group">+</button></div>
     ${S.dms.filter((d) => dmName(d).toLowerCase().includes(filter)).map((d) => { const o = dmOther(d);
       return `<div class="side-item ${d.id === S.view.dm ? 'active' : ''} ${d.id !== S.view.dm && isUnread(d.id, d.last_at) ? 'unread' : ''}${d.is_group ? '' : plateClass(o)}" data-dm="${d.id}">
-        ${d.is_group ? `<span class="av" style="width:32px;height:32px;font-size:13px;background:#06b6d4">${d.icon ? `<img src="${esc(d.icon)}">` : '👥'}</span>` : avatar(o, 32, true)}
+        ${d.is_group ? `<span class="av" style="width:32px;height:32px;font-size:13px;background:#f59e0b">${d.icon ? `<img src="${esc(d.icon)}">` : '👥'}</span>` : avatar(o, 32, true)}
         <span style="min-width:0"><div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(dmName(d))}</div>
         <div class="small muted">${d.is_group ? d.members.length + ' members' : esc(o.custom_status || '')}</div></span></div>`; }).join('')}`;
   document.querySelectorAll('[data-home]').forEach((el) => (el.onclick = () => { const t = el.dataset.home; if (t === 'shop') return shopModal(); if (t === 'bots') return botsModal(); openHome('friends'); }));
@@ -286,7 +287,7 @@ function renderMessages() {
   const box = $('#messages'); const ch = curChannel(); const d = S.dms.find((x) => x.id === S.view.dm);
   let head = '';
   if (ch) head = `<div class="welcome"><div class="av" style="width:68px;height:68px;font-size:34px;background:var(--bg3)">#</div><h2>Welcome to #${esc(ch.name)}!</h2><p class="muted">This is the start of the #${esc(ch.name)} channel.</p></div>`;
-  else if (d) head = `<div class="welcome">${d.is_group ? '<div class="av" style="width:80px;height:80px;font-size:36px;background:#06b6d4">👥</div>' : avatar(dmOther(d), 80)}<h2>${esc(dmName(d))}</h2><p class="muted">This is the beginning of your ${d.is_group ? 'group' : 'direct message history with <b>' + esc(dmOther(d).display_name) + '</b>'}.</p></div>`;
+  else if (d) head = `<div class="welcome">${d.is_group ? '<div class="av" style="width:80px;height:80px;font-size:36px;background:#f59e0b">👥</div>' : avatar(dmOther(d), 80)}<h2>${esc(dmName(d))}</h2><p class="muted">This is the beginning of your ${d.is_group ? 'group' : 'direct message history with <b>' + esc(dmOther(d).display_name) + '</b>'}.</p></div>`;
   box.innerHTML = (S.hasMore ? '<div style="text-align:center;padding:8px"><button class="btn sm" id="load-more">Load older messages</button></div>' : head);
   let prev = null; for (const m of S.messages) { box.appendChild(groupedEl(m, prev)); prev = m; }
   $('#load-more') && ($('#load-more').onclick = loadOlder);
@@ -332,7 +333,7 @@ $('#messages').addEventListener('click', (e) => {
   const men = e.target.closest('.mention-pill'); if (men) { const u = Object.values(S.users).find((x) => x.username === men.dataset.user); if (u) profilePopover(u.id, e.clientX, e.clientY); return; }
   if (e.target.classList.contains('spoiler')) return e.target.classList.toggle('shown');
   if (e.target.matches('[data-light]')) return lightbox(e.target.src);
-  const j = e.target.closest('[data-jump]'); if (j) { const t = document.querySelector(`[data-mid="${j.dataset.jump}"]`); if (t) { t.scrollIntoView({ block: 'center' }); t.style.background = '#7c5cff33'; setTimeout(() => (t.style.background = ''), 1500); } return; }
+  const j = e.target.closest('[data-jump]'); if (j) { const t = document.querySelector(`[data-mid="${j.dataset.jump}"]`); if (t) { t.scrollIntoView({ block: 'center' }); t.style.background = '#10b98133'; setTimeout(() => (t.style.background = ''), 1500); } return; }
   const r = e.target.closest('[data-react]'); if (r && m) return tryRun(() => api(`/messages/${m.id}/react`, { body: { emoji: r.dataset.react } }));
   const t = e.target.closest('[data-t]'); if (!t || !m) return;
   if (t.dataset.t === 'react') emojiPicker(e.clientX, e.clientY, (em) => tryRun(() => api(`/messages/${m.id}/react`, { body: { emoji: em } })));
@@ -385,7 +386,7 @@ input.addEventListener('keydown', (e) => {
 });
 input.addEventListener('paste', (e) => { const files = [...(e.clipboardData?.files || [])]; if (files.length) { e.preventDefault(); addFiles(files); } });
 $('#send-btn').onclick = () => send();
-$('#plus-btn').onclick = (e) => { e.stopPropagation(); menu(e.clientX, e.clientY - 200, [['📎 Upload a file', () => $('#file-input').click()], ['📊 Create a poll', () => pollModal()], ['🎟️ Send a sticker', () => stickerPicker(e.clientX, e.clientY)]]); };
+$('#plus-btn').onclick = (e) => { e.stopPropagation(); menu(e.clientX, e.clientY - 200, [['📎 Upload a file', () => $('#file-input').click()], ['📊 Create a poll', () => pollModal()], ['🎟️ Send a sticker', () => stickerPicker(e.clientX, e.clientY)], ['⏰ Schedule a message', () => scheduleModal()]]); };
 function pollModal() {
   const m = modal(`<h2>📊 Create a poll</h2><form id="pl"><label>Question<input name="q" required maxlength="300" placeholder="What should we play tonight?"></label><div id="pl-opts"></div>
     <button type="button" class="btn sm" id="pl-add">+ Add answer</button><label style="flex-direction:row;align-items:center;gap:8px;display:flex;margin-top:10px"><input type="checkbox" name="multi" style="width:auto"> Allow multiple answers</label><div class="row"><button class="btn primary">Post poll</button></div></form>`);
@@ -519,7 +520,7 @@ $('#members').addEventListener('contextmenu', (e) => {
 // server modals
 function serverMenu(s, x, y) {
   const admin = ['owner', 'admin'].includes(s.my_role);
-  menu(x, y, [['📨 Invite people', () => inviteModal(s)], admin && ['⚙️ Server settings', () => serverSettingsModal(s)], admin && ['➕ Create channel', () => createChannelModal(s)], ['📅 Events', () => window.ZE?.open(s)], admin && ['😀 Emoji & stickers', () => emojiAdminModal(s)],
+  menu(x, y, [['📨 Invite people', () => inviteModal(s)], admin && ['⚙️ Server settings', () => serverSettingsModal(s)], admin && ['➕ Create channel', () => createChannelModal(s)], ['📅 Events', () => window.ZE?.open(s)], ['🏆 Leaderboard', () => leaderboardModal(s)], admin && ['😀 Emoji & stickers', () => emojiAdminModal(s)],
     admin && S.bots.length && ['🤖 Add one of my bots', () => addBotToServerModal(s)], s.my_role === 'owner' && !s.is_official && ['🗑️ Delete server', () => confirm(`Delete ${s.name}? This can't be undone.`) && tryRun(async () => { await api('/servers/' + s.id, { method: 'DELETE' }); }), 'danger'],
     s.my_role !== 'owner' && ['🚪 Leave server', () => confirm('Leave ' + s.name + '?') && tryRun(async () => { await api(`/servers/${s.id}/leave`, { body: {} }); S.servers = S.servers.filter((x) => x.id !== s.id); openHome(); }), 'danger']]);
 }
@@ -609,7 +610,7 @@ function shopModal() {
   const m = modal(`<h2>🛍️ Zuno Shop <span class="badge" style="background:var(--green);font-size:12px">EVERYTHING FREE</span></h2><p class="muted">Other apps charge for this. Here it's yours. Claim, then equip.</p>
     <div class="tabs"><button class="on" data-st="decoration">Avatar decorations</button><button data-st="nameplate">Name plates</button><button data-st="profile_frame">Profile frames</button></div><div class="grid" id="shop-grid"></div>`, 'wide');
   const draw = (type) => { $('#shop-grid', m).innerHTML = S.shop.filter((i) => i.type === type).map((i) => { const owned = S.inventory.includes(i.id); const on = S.me[type] === i.id;
-    const prev = type === 'decoration' ? avatar({ ...S.me, decoration: i.id, _preview: true }, 64) : type === 'profile_frame' ? `<div class="frame-prev profile-card framed frame-${i.css}"><div class="banner" style="height:34px;background:${esc(S.me.banner_color || '#5865f2')}"></div><div style="padding:6px 8px;display:flex;gap:6px;align-items:center">${avatar({ ...S.me, decoration: null, _preview: true }, 26)}<b class="small">${esc(S.me.display_name)}</b></div></div>` : `<div class="plate-prev plate plate-${i.css}">${avatar({ ...S.me, decoration: null, _preview: true }, 28)} ${esc(S.me.display_name)}</div>`;
+    const prev = type === 'decoration' ? avatar({ ...S.me, decoration: i.id, _preview: true }, 64) : type === 'profile_frame' ? `<div class="frame-prev profile-card framed frame-${i.css}"><div class="banner" style="height:34px;background:${esc(S.me.banner_color || '#14b8a6')}"></div><div style="padding:6px 8px;display:flex;gap:6px;align-items:center">${avatar({ ...S.me, decoration: null, _preview: true }, 26)}<b class="small">${esc(S.me.display_name)}</b></div></div>` : `<div class="plate-prev plate plate-${i.css}">${avatar({ ...S.me, decoration: null, _preview: true }, 28)} ${esc(S.me.display_name)}</div>`;
     return `<div class="shop-item"><div class="preview">${prev}</div><b>${esc(i.name)}</b><span class="small muted">Free</span>${!owned ? `<button class="btn primary sm" data-claim="${i.id}">Claim</button>` : on ? `<button class="btn sm" data-unequip="${type}">Unequip</button>` : `<button class="btn green sm" data-equip="${i.id}" data-type="${type}">Equip</button>`}</div>`; }).join('');
     m.querySelectorAll('[data-claim]').forEach((b) => (b.onclick = () => tryRun(async () => { await api(`/shop/${b.dataset.claim}/claim`, { body: {} }); S.inventory.push(b.dataset.claim); toast('Claimed! 🎉'); draw(type); })));
     m.querySelectorAll('[data-equip]').forEach((b) => (b.onclick = () => tryRun(async () => { const u = await api('/me', { method: 'PATCH', body: { [b.dataset.type]: b.dataset.equip } }); Object.assign(S.me, u); cacheUser(u); renderMe(); draw(type); })));
@@ -657,7 +658,7 @@ function addBotToServerModal(s) {
 
 // settings
 function settingsModal(tab = 'profile') {
-  const u = S.me; const colors = ['#5865f2', '#7c5cff', '#eb459e', '#ed4245', '#f97316', '#f0b232', '#57f287', '#06b6d4', '#0f172a', '#ffffff'];
+  const u = S.me; const colors = ['#14b8a6', '#10b981', '#eb459e', '#ed4245', '#f97316', '#f0b232', '#57f287', '#f59e0b', '#0f172a', '#ffffff'];
   const m = modal(`<h2>⚙️ Settings</h2><div class="tabs">${['profile', 'account', 'appearance', 'notifications', 'voice', 'get the app'].map((t) => `<button data-tab="${t}" class="${t === tab ? 'on' : ''}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div><div id="set-body"></div>
     <div class="row" style="justify-content:space-between"><button class="btn danger" id="logout">Log out</button></div>`, 'wide');
   const body = $('#set-body', m);
@@ -707,10 +708,10 @@ function settingsModal(tab = 'profile') {
     }
     if (t === 'voice') window.ZV?.settings(body);
     if (t === 'get the app') {
-      body.innerHTML = `<div class="dl-grid"><div class="dl"><div style="font-size:34px">🤖</div><b>Android</b><p class="small muted">Download the APK, then allow "install unknown apps" when asked.</p><a class="btn primary" href="https://github.com/arazJjj/Zuno-opensource-discord-clone/releases/latest" target="_blank">Download for Android</a></div>
+      body.innerHTML = `<div class="dl-grid"><div class="dl"><div style="font-size:34px">🤖</div><b>Android</b><p class="small muted">Download the APK, then allow "install unknown apps" when asked.</p><a class="btn primary" href="https://github.com/arazJjj/Zuno/releases/latest" target="_blank">Download for Android</a></div>
         <div class="dl"><div style="font-size:34px">🍎</div><b>iPhone & iPad</b><p class="small muted">Open Zuno in Safari, tap Share, then "Add to Home Screen".</p></div>
         <div class="dl"><div style="font-size:34px">💻</div><b>Windows, Mac & Linux</b><p class="small muted">In Chrome or Edge, click the install icon in the address bar to get Zuno as an app.</p><button class="btn" id="pwa-btn">Install app</button></div></div>
-        <p class="small muted">Zuno is free and open source. <a href="https://github.com/arazJjj/Zuno-opensource-discord-clone" target="_blank">See the code</a></p>`;
+        <p class="small muted">Zuno is free and open source. <a href="https://github.com/arazJjj/Zuno" target="_blank">See the code</a></p>`;
       $('#pwa-btn').onclick = () => { if (window._pwa) { window._pwa.prompt(); } else toast('Use your browser menu → Install Zuno'); };
     }
   };
@@ -736,3 +737,25 @@ async function emojiAdminModal(s) {
   if (mInv) { sessionStorage.zunoInvite = mInv[1]; history.replaceState(null, '', '/'); }
   await start();
 })();
+
+// ---------- Zuno originals: leaderboard + scheduled messages ----------
+async function leaderboardModal(s) {
+  const rows = await api(`/servers/${s.id}/leaderboard`).catch(() => []);
+  const need = (l) => 40 * l * l;
+  const m = modal(`<h2>${esc(s.name)} leaderboard</h2><p class="small muted">Chat to earn XP (once every 30 seconds). Levels show who keeps this place alive.</p>
+    <div class="lb">${rows.length ? rows.map((r, i) => { const pct = Math.min(100, Math.round(100 * (r.xp - need(r.level)) / (need(r.level + 1) - need(r.level))));
+      return `<div class="lb-row"><span class="lb-rank r${i + 1}">${i + 1}</span>${avatar(r.user, 32)}<div class="lb-mid"><b>${esc(r.user.display_name)}</b><div class="lb-bar"><i style="width:${pct}%"></i></div></div><div class="lb-lvl">Lv ${r.level}<div class="small muted">${r.xp} XP</div></div></div>`; }).join('') : '<p class="muted">No one has earned XP here yet. Say something!</p>'}</div>`);
+}
+async function scheduleModal() {
+  if (!S.view.channel && !S.view.dm) return toast('Open a channel or DM first');
+  const list = await api('/scheduled').catch(() => []);
+  const d = new Date(Date.now() + 60 * 60000); d.setSeconds(0, 0); const pad = (n) => String(n).padStart(2, '0');
+  const local = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const m = modal(`<h2>Schedule a message</h2><form id="sch" class="stack"><label>Message<textarea name="content" rows="3" maxlength="4000">${esc(input.value)}</textarea></label>
+    <label>Send at<input type="datetime-local" name="when" value="${local}"></label><button class="btn primary wide">Schedule</button></form>
+    ${list.length ? `<h3 style="margin-top:18px">Waiting to send</h3>${list.map((x) => `<div class="sch-row"><div><div>${esc(x.content.slice(0, 80))}</div><div class="small muted">${new Date(x.send_at).toLocaleString()}</div></div><button class="btn sm danger" data-unsch="${x.id}">Cancel</button></div>`).join('')}` : ''}`);
+  $('#sch', m).onsubmit = (e) => { e.preventDefault(); const f = e.target; tryRun(async () => {
+    await api('/scheduled', { body: { content: f.content.value, send_at: new Date(f.when.value).getTime(), channel_id: S.view.channel, dm_id: S.view.dm } });
+    input.value = ''; closeModal(); toast('Scheduled'); }); };
+  m.querySelectorAll('[data-unsch]').forEach((b) => (b.onclick = () => tryRun(async () => { await api('/scheduled/' + b.dataset.unsch, { method: 'DELETE' }); scheduleModal(); })));
+}

@@ -51,6 +51,8 @@ db.exec(`
 CREATE TABLE IF NOT EXISTS poll_votes(message_id TEXT, user_id TEXT, opt INTEGER, PRIMARY KEY(message_id,user_id,opt));
 CREATE TABLE IF NOT EXISTS emojis(id TEXT PRIMARY KEY, server_id TEXT, name TEXT, url TEXT, kind TEXT DEFAULT 'emoji', creator TEXT, created_at INTEGER);
 CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY, server_id TEXT, name TEXT, description TEXT DEFAULT '', location TEXT DEFAULT '', starts_at INTEGER, creator TEXT, created_at INTEGER);
+CREATE TABLE IF NOT EXISTS xp(server_id TEXT, user_id TEXT, xp INTEGER DEFAULT 0, last_at INTEGER DEFAULT 0, PRIMARY KEY(server_id,user_id));
+CREATE TABLE IF NOT EXISTS scheduled(id TEXT PRIMARY KEY, author_id TEXT, channel_id TEXT, dm_id TEXT, content TEXT, send_at INTEGER, created_at INTEGER);
 CREATE TABLE IF NOT EXISTS event_rsvps(event_id TEXT, user_id TEXT, PRIMARY KEY(event_id,user_id));
 CREATE INDEX IF NOT EXISTS idx_msg_thread ON messages(thread_id, created_at);
 `);
@@ -172,8 +174,28 @@ function createMessage({ channel_id = null, dm_id = null, author_id, content = '
     for (const r of db.prepare('SELECT user_id FROM dm_members WHERE dm_id=?').all(dm_id)) io.to('user:' + r.user_id).emit('message:new', full);
   }
   if (!getUser(author_id)?.is_bot) setImmediate(() => runBots(full));
+  if (channel_id && !getUser(author_id)?.is_bot) awardXp(channel(channel_id).server_id, author_id);
   return full;
 }
+// ---------- XP levels (Zuno original) ----------
+const levelOf = (xp) => Math.floor(Math.sqrt(xp / 40));
+function awardXp(server_id, user_id) {
+  const row = db.prepare('SELECT * FROM xp WHERE server_id=? AND user_id=?').get(server_id, user_id);
+  const t = now(); if (row && t - row.last_at < 30000) return; // 30s cooldown so spam doesn't farm XP
+  const before = row?.xp || 0, after = before + 10 + Math.floor(Math.random() * 11);
+  if (row) db.prepare('UPDATE xp SET xp=?, last_at=? WHERE server_id=? AND user_id=?').run(after, t, server_id, user_id);
+  else db.prepare('INSERT INTO xp(server_id,user_id,xp,last_at) VALUES(?,?,?,?)').run(server_id, user_id, after, t);
+  if (levelOf(after) > levelOf(before)) io.to('user:' + user_id).emit('levelup', { server_id, level: levelOf(after), server: db.prepare('SELECT name FROM servers WHERE id=?').get(server_id)?.name });
+}
+// ---------- scheduled messages (Zuno original) ----------
+function sendDueScheduled() {
+  for (const s of db.prepare('SELECT * FROM scheduled WHERE send_at<=?').all(now())) {
+    db.prepare('DELETE FROM scheduled WHERE id=?').run(s.id);
+    const req = { user: getUser(s.author_id) }; if (!req.user || !canSee(req, { channel_id: s.channel_id, dm_id: s.dm_id })) continue;
+    try { createMessage({ channel_id: s.channel_id, dm_id: s.dm_id, author_id: s.author_id, content: s.content }); io.to('user:' + s.author_id).emit('scheduled:changed'); } catch (e) { console.error('scheduled', e.message); }
+  }
+}
+setInterval(sendDueScheduled, 15000);
 
 // ---------- bots ----------
 const JOKES = ['Why do programmers prefer dark mode? Because light attracts bugs.', 'I told my Wi-Fi a joke. It did not get the connection.',
@@ -482,6 +504,22 @@ function broadcastMessage(m, event, payload) {
   if (m.channel_id) io.to('server:' + channel(m.channel_id).server_id).emit(event, payload);
   else for (const r of db.prepare('SELECT user_id FROM dm_members WHERE dm_id=?').all(m.dm_id)) io.to('user:' + r.user_id).emit(event, payload);
 }
+app.get('/api/servers/:id/leaderboard', auth, (req, res) => {
+  if (!isMember(req.params.id, req.user.id)) return err(res, 'No access', 403);
+  const rows = db.prepare('SELECT user_id, xp FROM xp WHERE server_id=? ORDER BY xp DESC LIMIT 25').all(req.params.id);
+  res.json(rows.map((r) => ({ user: publicUser(getUser(r.user_id)), xp: r.xp, level: levelOf(r.xp) })).filter((r) => r.user));
+});
+app.get('/api/scheduled', auth, (req, res) => res.json(db.prepare('SELECT * FROM scheduled WHERE author_id=? ORDER BY send_at').all(req.user.id)));
+app.post('/api/scheduled', auth, (req, res) => {
+  const { channel_id = null, dm_id = null } = req.body || {}; const content = String(req.body?.content || '').trim().slice(0, 4000); const send_at = +req.body?.send_at;
+  if (!content) return err(res, 'Write a message first');
+  if (!send_at || send_at < now() + 30000 || send_at > now() + 30 * 864e5) return err(res, 'Pick a time between 1 minute and 30 days from now');
+  if (!canSee(req, { channel_id, dm_id })) return err(res, 'No access', 403);
+  if (db.prepare('SELECT COUNT(*) c FROM scheduled WHERE author_id=?').get(req.user.id).c >= 25) return err(res, 'You can schedule up to 25 messages');
+  const row = { id: id(), author_id: req.user.id, channel_id, dm_id, content, send_at, created_at: now() };
+  db.prepare('INSERT INTO scheduled(id,author_id,channel_id,dm_id,content,send_at,created_at) VALUES(@id,@author_id,@channel_id,@dm_id,@content,@send_at,@created_at)').run(row); res.json(row);
+});
+app.delete('/api/scheduled/:id', auth, (req, res) => { db.prepare('DELETE FROM scheduled WHERE id=? AND author_id=?').run(req.params.id, req.user.id); res.json({ ok: true }); });
 app.patch('/api/messages/:id', auth, (req, res) => {
   const m = db.prepare('SELECT * FROM messages WHERE id=?').get(req.params.id);
   if (!m) return err(res, 'Not found', 404);

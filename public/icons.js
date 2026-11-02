@@ -16,6 +16,8 @@
     search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
     mailPlus: '<path d="M22 13V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8"/><path d="m22 7-10 6L2 7M19 16v6M16 19h6"/>',
     gamepad: '<path d="M6 11h4M8 9v4M15 12h.01M18 10h.01"/><rect x="2" y="6" width="20" height="12" rx="6"/>',
+    trophy: '<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
     volume: '<path d="M11 5 6 9H2v6h4l5 4V5zM15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
@@ -66,7 +68,7 @@
   const MAP = {
     '👥': 'users', '✕': 'x', '✖': 'x', '❌': 'x', '✓': 'check', '✔': 'check', '✅': 'checkCircle', '📌': 'pin', '⚙': 'settings',
     '🤖': 'bot', '📊': 'chart', '🛍': 'bag', '😀': 'smile', '😊': 'smile', '📢': 'megaphone', '📣': 'megaphone', '✏': 'pencil', '🔍': 'search',
-    '📨': 'mailPlus', '🎮': 'gamepad', '📅': 'calendar', '🔊': 'volume', '➕': 'plus', '＋': 'plus', '💬': 'message', '📄': 'file', '🧵': 'thread',
+    '📨': 'mailPlus', '🎮': 'gamepad', '📅': 'calendar', '🏆': 'trophy', '⏰': 'clock', '🔊': 'volume', '➕': 'plus', '＋': 'plus', '💬': 'message', '📄': 'file', '🧵': 'thread',
     '🔗': 'link', '🗑': 'trash', '📎': 'paperclip', '🎵': 'music', '🎶': 'music', '📸': 'camera', '💻': 'monitor', '🖥': 'monitor', '☀': 'sun', '🌙': 'moon',
     '☰': 'menu', '📞': 'phone', '📵': 'phoneOff', '🎥': 'video', '👑': 'crown', '📋': 'copy', '🎟': 'ticket', '🚪': 'door', '🛠': 'hammer',
     '🧭': 'compass', '🍎': 'apple', '▶': 'play', '🌐': 'globe', '🐙': 'github', '➤': 'send', '↩': 'reply', '📍': 'mapPin', '🔔': 'bell',

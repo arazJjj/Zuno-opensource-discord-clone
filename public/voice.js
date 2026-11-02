@@ -183,7 +183,7 @@ window.ZV = (() => {
   function renderActivity() {
     const slot = $('#act-slot'); if (!slot || !V.activity) return;
     if (V.activity.type === 'whiteboard') {
-      slot.innerHTML = `<div class="activity" data-type="whiteboard"><div class="act-tools">${['#ffffff', '#ed4245', '#f0b232', '#57f287', '#5865f2', '#eb459e', '#000000'].map((c) => `<button class="sw" data-c="${c}" style="background:${c}"></button>`).join('')}
+      slot.innerHTML = `<div class="activity" data-type="whiteboard"><div class="act-tools">${['#ffffff', '#ed4245', '#f0b232', '#57f287', '#14b8a6', '#eb459e', '#000000'].map((c) => `<button class="sw" data-c="${c}" style="background:${c}"></button>`).join('')}
         <input type="range" min="2" max="24" value="4" id="wb-w"><button class="btn sm" id="wb-clear">Clear</button></div><canvas id="wb" width="1280" height="720"></canvas></div>`;
       const cv = $('#wb'); wbCtx = cv.getContext('2d'); let color = '#ffffff', pts = null;
       slot.querySelectorAll('[data-c]').forEach((b) => (b.onclick = () => (color = b.dataset.c)));
