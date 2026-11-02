@@ -59,6 +59,13 @@ module.exports = function openDb(dataDir) {
     // 1) bring Turso's tables up to date with this version's schema (+ seed rows)
     for (let i = 0; i < 5; i++) { try { await flush(); break; } catch {} }
     // 2) refill the local file from Turso
+    const total = await pull('REPLACE');
+    restoring = false; flush();
+    // During a redeploy the old server keeps running for a minute and writes straight to Turso.
+    // Catch those rows up a few times after boot so nothing sent then goes missing.
+    [45, 90, 150, 240].forEach((sec) => setTimeout(() => flush().then(() => pull('IGNORE', true)).catch(() => {}), sec * 1000).unref());
+  };
+  async function pull(mode, quiet) {
     const tables = prep("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all().map((t) => t.name);
     let total = 0;
     for (let attempt = 1; attempt <= 5; attempt++) {
@@ -71,20 +78,21 @@ module.exports = function openDb(dataDir) {
             const rs = data[t]; if (!rs.rows.length) continue;
             const localCols = new Set(prep(`PRAGMA table_info("${t}")`).all().map((c) => c.name));
             const cols = rs.columns.filter((c) => localCols.has(c));
-            const ins = prep(`INSERT OR REPLACE INTO "${t}"(${cols.map((c) => `"${c}"`).join(',')}) VALUES(${cols.map(() => '?').join(',')})`);
-            for (const row of rs.rows) { ins.run(cols.map((c) => { const v = row[c]; return typeof v === 'bigint' ? Number(v) : v instanceof ArrayBuffer ? Buffer.from(v) : v; })); total++; }
+            const ins = prep(`INSERT OR ${mode} INTO "${t}"(${cols.map((c) => `"${c}"`).join(',')}) VALUES(${cols.map(() => '?').join(',')})`);
+            for (const row of rs.rows) { total += ins.run(cols.map((c) => { const v = row[c]; return typeof v === 'bigint' ? Number(v) : v instanceof ArrayBuffer ? Buffer.from(v) : v; })).changes; }
           }
         })();
         db.pragma('foreign_keys = ON');
-        console.log(`Zuno storage: Turso (permanent), restored ${total} rows`);
-        break;
+        if (!quiet) console.log(`Zuno storage: Turso (permanent), restored ${total} rows`);
+        else if (total) console.log(`Zuno storage: caught up ${total} rows from Turso`);
+        return total;
       } catch (e) {
         console.error(`turso restore attempt ${attempt} failed:`, e.message);
-        if (attempt === 5) console.error('Starting without restore; writes will still be saved to Turso.');
-        else await new Promise((r) => setTimeout(r, 3000));
+        if (attempt === 5 || quiet) { if (!quiet) console.error('Starting without restore; writes will still be saved to Turso.'); return 0; }
+        await new Promise((r) => setTimeout(r, 3000));
       }
     }
-    restoring = false; flush();
-  };
+    return 0;
+  }
   return db;
 };
