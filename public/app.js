@@ -56,12 +56,14 @@ const cacheUser = (u) => { if (u) S.users[u.id] = { ...(S.users[u.id] || {}), ..
 function connect() {
   socket?.disconnect();
   socket = io({ auth: { token: S.token } });
+  let firstConnect = true; socket.on('connect', () => { if (firstConnect) { firstConnect = false; return; } resync(); });
   socket.on('message:new', (m) => {
     cacheUser(m.author);
     if (m.thread_id) { window.ZT?.onMessage(m); if (m.author_id !== S.me.id && mentionsMe(m.content)) { Z.sound('mention'); notify(m); } return; }
     if (m.author_id !== S.me.id && !m.author?.is_bot) { const here0 = (m.channel_id && m.channel_id === S.view.channel) || (m.dm_id && m.dm_id === S.view.dm);
       if (m.dm_id || mentionsMe(m.content)) Z.sound(mentionsMe(m.content) ? 'mention' : 'message'); else if (here0 && document.hasFocus()) Z.sound('soft'); }
     const here = (m.channel_id && m.channel_id === S.view.channel) || (m.dm_id && m.dm_id === S.view.dm);
+    if (here && S.messages.some((x) => x.id === m.id)) return;
     if (here) { S.messages.push(m); appendMessage(m); markRead(); delete S.typing[m.author_id]; renderTyping(); }
     else {
       if (m.dm_id) { const d = S.dms.find((x) => x.id === m.dm_id); if (d) d.last_at = m.created_at; }
@@ -99,7 +101,7 @@ const mentionsMe = (t) => new RegExp('@(' + S.me.username + '|everyone)\\b', 'i'
 // ---------- render helpers ----------
 const initials = (n) => esc((n || '?').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase());
 function avatar(u, size = 40, dot = false) {
-  u = S.users[u?.id] || u || {};
+  u = u?._preview ? u : S.users[u?.id] || u || {};
   const deco = u.decoration ? ' ' + (S.shop.find((s) => s.id === u.decoration)?.css ? 'deco-' + S.shop.find((s) => s.id === u.decoration).css : '') : '';
   const inner = u.avatar ? `<img src="${esc(u.avatar)}" alt="">` : initials(u.display_name);
   return `<span class="av${deco}" style="width:${size}px;height:${size}px;font-size:${size * 0.38}px;background:${esc(u.banner_color || '#7c5cff')}">${inner}${dot ? `<span class="dot ${u.online ? 'on' : ''}"></span>` : ''}</span>`;
@@ -410,8 +412,25 @@ async function send(extra = {}) {
     const up = await tryRun(() => api('/upload', { body: fd })); if (!up) return; attachments = attachments.concat(up); S.pending = []; renderPending(); }
   const body = { content: extra.attachments ? '' : content, attachments, reply_to: S.replyTo?.id, channel_id: S.view.channel, dm_id: S.view.dm };
   if (!extra.attachments) { input.value = ''; input.style.height = 'auto'; }
-  clearReply(); await tryRun(() => api('/messages', { body }));
+  clearReply(); const sent = await tryRun(() => api('/messages', { body }));
+  // show it right away even if the live connection missed it (e.g. during a redeploy)
+  if (sent?.id && !sent.thread_id && ((sent.channel_id && sent.channel_id === S.view.channel) || (sent.dm_id && sent.dm_id === S.view.dm)) && !S.messages.some((x) => x.id === sent.id)) {
+    cacheUser(sent.author); S.messages.push(sent); appendMessage(sent); }
 }
+// resync after the live connection drops (server restart, phone sleep, app in background)
+async function resync() {
+  if (!S.token || (!S.view.channel && !S.view.dm)) return;
+  const q = S.view.channel ? 'channel_id=' + S.view.channel : 'dm_id=' + S.view.dm; const key = q;
+  const fresh = await api('/messages?' + q).catch(() => null); if (!fresh || key !== (S.view.channel ? 'channel_id=' + S.view.channel : 'dm_id=' + S.view.dm)) return;
+  const known = new Set(S.messages.map((m) => m.id)); const add = fresh.filter((m) => !known.has(m.id));
+  const changed = fresh.some((m) => { const o = S.messages.find((x) => x.id === m.id); return o && (o.content !== m.content || o.edited_at !== m.edited_at); });
+  if (!add.length && !changed) return;
+  const old = S.messages.filter((m) => !fresh.some((f) => f.id === m.id) && m.created_at < (fresh[0]?.created_at || 0));
+  S.messages = old.concat(fresh); S.messages.forEach((m) => cacheUser(m.author)); const box = $('#messages'); const atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
+  renderMessages(); if (atEnd) box.scrollTop = box.scrollHeight;
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) resync(); });
+setInterval(() => { if (!document.hidden) resync(); }, 20000);
 function mentionSuggest() {
   const m = input.value.slice(0, input.selectionStart).match(/@([a-z0-9_.]*)$/i); if (!m) { if ($('#popover').dataset.kind === 'mention') hidePop(); return; }
   const pool = S.view.server ? S.members[S.view.server] || [] : S.dms.find((d) => d.id === S.view.dm)?.members || [];
@@ -590,7 +609,7 @@ function shopModal() {
   const m = modal(`<h2>🛍️ Zuno Shop <span class="badge" style="background:var(--green);font-size:12px">EVERYTHING FREE</span></h2><p class="muted">Other apps charge for this. Here it's yours. Claim, then equip.</p>
     <div class="tabs"><button class="on" data-st="decoration">Avatar decorations</button><button data-st="nameplate">Name plates</button><button data-st="profile_frame">Profile frames</button></div><div class="grid" id="shop-grid"></div>`, 'wide');
   const draw = (type) => { $('#shop-grid', m).innerHTML = S.shop.filter((i) => i.type === type).map((i) => { const owned = S.inventory.includes(i.id); const on = S.me[type] === i.id;
-    const prev = type === 'decoration' ? avatar({ ...S.me, decoration: i.id }, 64) : type === 'profile_frame' ? `<div class="frame-prev profile-card framed frame-${i.css}"><div class="banner" style="height:34px;background:${esc(S.me.banner_color || '#5865f2')}"></div><div style="padding:6px 8px;display:flex;gap:6px;align-items:center">${avatar({ ...S.me, decoration: null }, 26)}<b class="small">${esc(S.me.display_name)}</b></div></div>` : `<div class="plate-prev plate plate-${i.css}">${avatar({ ...S.me, decoration: null }, 28)} ${esc(S.me.display_name)}</div>`;
+    const prev = type === 'decoration' ? avatar({ ...S.me, decoration: i.id, _preview: true }, 64) : type === 'profile_frame' ? `<div class="frame-prev profile-card framed frame-${i.css}"><div class="banner" style="height:34px;background:${esc(S.me.banner_color || '#5865f2')}"></div><div style="padding:6px 8px;display:flex;gap:6px;align-items:center">${avatar({ ...S.me, decoration: null, _preview: true }, 26)}<b class="small">${esc(S.me.display_name)}</b></div></div>` : `<div class="plate-prev plate plate-${i.css}">${avatar({ ...S.me, decoration: null, _preview: true }, 28)} ${esc(S.me.display_name)}</div>`;
     return `<div class="shop-item"><div class="preview">${prev}</div><b>${esc(i.name)}</b><span class="small muted">Free</span>${!owned ? `<button class="btn primary sm" data-claim="${i.id}">Claim</button>` : on ? `<button class="btn sm" data-unequip="${type}">Unequip</button>` : `<button class="btn green sm" data-equip="${i.id}" data-type="${type}">Equip</button>`}</div>`; }).join('');
     m.querySelectorAll('[data-claim]').forEach((b) => (b.onclick = () => tryRun(async () => { await api(`/shop/${b.dataset.claim}/claim`, { body: {} }); S.inventory.push(b.dataset.claim); toast('Claimed! 🎉'); draw(type); })));
     m.querySelectorAll('[data-equip]').forEach((b) => (b.onclick = () => tryRun(async () => { const u = await api('/me', { method: 'PATCH', body: { [b.dataset.type]: b.dataset.equip } }); Object.assign(S.me, u); cacheUser(u); renderMe(); draw(type); })));
