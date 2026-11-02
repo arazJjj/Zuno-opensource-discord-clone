@@ -1,0 +1,7 @@
+<resources>
+    <style name="ZunoTheme" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#1e1f22</item>
+        <item name="android:colorAccent">#7c5cff</item>
+    </style>
+    <color name="zuno_bg">#7c5cff</color>
+</resources>
