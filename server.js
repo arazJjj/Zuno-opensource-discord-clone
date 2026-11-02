@@ -794,4 +794,4 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, () => console.log(`Zuno running on http://localhost:${PORT}`));
+db.ready().then(() => server.listen(PORT, () => console.log(`Zuno running on http://localhost:${PORT}`)));

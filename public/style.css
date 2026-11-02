@@ -194,3 +194,10 @@ body.thread-open .members{display:none}
   .call-stage{width:100%;inset:0}.tiles.side{flex:0 0 auto;grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}.stage-body{flex-direction:column}
   .thread-panel{position:fixed;inset:48px 0 0 0;width:auto;z-index:35}
 }
+
+/* ---- line icons (replace emoji in the interface) ---- */
+.zi { display: inline-block; vertical-align: -0.2em; flex-shrink: 0; }
+.ctx button .zi, .choice .zi, h2 .zi, h3 .zi { margin-right: 6px; }
+.hash .zi { width: 18px; height: 18px; opacity: .8; }
+.dl .zi { width: 34px; height: 34px; }
+.call-btn .zi { width: 26px; height: 26px; }

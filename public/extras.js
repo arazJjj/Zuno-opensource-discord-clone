@@ -48,7 +48,7 @@ window.ZE = (() => {
         <div class="row" style="justify-content:flex-start;gap:8px;margin-top:8px"><button class="btn sm ${e.me_going ? 'green' : 'primary'}" data-rsvp="${e.id}">${e.me_going ? '✅ Going' : '🔔 Interested'}</button><span class="small muted">${e.going} going</span>
         ${admin ? `<button class="btn sm danger" data-delev="${e.id}">Delete</button>` : ''}</div></div>`).join('') : '<p class="muted">No upcoming events.</p>'}
       ${admin ? `<div class="side-cat" style="padding-left:0">Create an event</div><form id="ev-form"><label>Event name<input name="name" required maxlength="100" placeholder="Game night"></label>
-        <label>Starts<input type="datetime-local" name="starts" required></label><label>Where<input name="location" placeholder="🔊 Lounge, a Roblox game, a website…"></label>
+        <label>Starts<input type="datetime-local" name="starts" required></label><label>Where<input name="location" placeholder="Lounge, a Roblox game, a website…"></label>
         <label>Description<textarea name="description" rows="2"></textarea></label><div class="row"><button class="btn primary">Create event</button></div></form>` : ''}`, 'wide');
     m.querySelectorAll('[data-rsvp]').forEach((b) => (b.onclick = () => tryRun(async () => { await api(`/events/${b.dataset.rsvp}/rsvp`, { body: {} }); open(s); })));
     m.querySelectorAll('[data-delev]').forEach((b) => (b.onclick = () => confirm('Delete this event?') && tryRun(async () => { await api('/events/' + b.dataset.delev, { method: 'DELETE' }); open(s); })));

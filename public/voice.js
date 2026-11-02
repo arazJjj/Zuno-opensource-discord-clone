@@ -135,7 +135,7 @@ window.ZV = (() => {
   function listHtml(room) {
     const r = V.rooms[room]; if (!r?.users.length) return '';
     return `<div class="voice-users">${r.users.map((u) => { const us = user(u.uid);
-      return `<div class="voice-user" data-vuid="${u.uid}">${avatar(us, 22)}<span>${esc0(us.display_name)}</span>${u.screen ? '<span class="live">LIVE</span>' : ''}${u.video ? '🎥' : ''}${u.deaf ? '🔇' : u.muted ? '🎙️̸' : ''}</div>`; }).join('')}</div>`;
+      return `<div class="voice-user" data-vuid="${u.uid}">${avatar(us, 22)}<span>${esc0(us.display_name)}</span>${u.screen ? '<span class="live">LIVE</span>' : ''}${u.video ? '🎥' : ''}${u.deaf ? '🔇' : u.muted ? '🔇' : ''}</div>`; }).join('')}</div>`;
   }
   function render() {
     const bar = $('#voice-bar');
@@ -245,7 +245,7 @@ window.ZV = (() => {
     $('#incoming')?.remove(); document.body.appendChild(el);
     $('#in-yes').onclick = () => { stopRing(); join('dm:' + dm_id, d ? dmName(d) : from.display_name); if (d) openDm(dm_id); };
     $('#in-no').onclick = () => { sock.emit('call:decline', { dm_id }); stopRing(); };
-    if (window.ZunoAndroid?.notify && (document.hidden || !document.hasFocus())) try { ZunoAndroid.notify('📞 ' + from.display_name, 'Incoming call on Zuno'); } catch {}
+    if (window.ZunoAndroid?.notify && (document.hidden || !document.hasFocus())) try { ZunoAndroid.notify(from.display_name, 'Incoming call on Zuno'); } catch {}
     setTimeout(() => { if (ringingDm === dm_id) stopRing(); }, 45000);
   }
   function stopRing() { ringingDm = null; Z.ring(false); $('#incoming')?.remove(); }

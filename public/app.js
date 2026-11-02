@@ -91,7 +91,7 @@ setInterval(() => { let ch = false; for (const k in S.typing) if (Date.now() - S
 
 function notify(m) {
   if (document.hasFocus() && !document.hidden) return;
-  if (window.ZunoAndroid?.notify) { try { ZunoAndroid.notify(m.author.display_name, m.content || (m.poll ? '📊 ' + m.poll.question : 'Sent an attachment')); } catch {} return; }
+  if (window.ZunoAndroid?.notify) { try { ZunoAndroid.notify(m.author.display_name, m.content || (m.poll ? 'Poll: ' + m.poll.question : 'Sent an attachment')); } catch {} return; }
   if (Notification?.permission === 'granted') new Notification(m.author.display_name, { body: m.content || 'Sent an attachment', icon: m.author.avatar || '/logo.svg' });
 }
 const mentionsMe = (t) => new RegExp('@(' + S.me.username + '|everyone)\\b', 'i').test(t || '');
@@ -541,7 +541,7 @@ function serverSettingsModal(s) {
 }
 function createChannelModal(s, preType) {
   const m = modal(`<h2>Create channel</h2><form id="cc"><label>Channel name<input name="name" required placeholder="new-channel"></label><label>Topic<input name="topic"></label>
-    <label>Type<select name="type"><option value="text"># Text — anyone can chat</option><option value="announcement">📢 Announcement — only admins post</option><option value="voice" ${preType === 'voice' ? 'selected' : ''}>🔊 Voice — talk, video, screen share</option></select></label><div class="row"><button class="btn primary">Create</button></div></form>`);
+    <label>Type<select name="type"><option value="text"># Text — anyone can chat</option><option value="announcement">Announcement — only admins post</option><option value="voice" ${preType === 'voice' ? 'selected' : ''}>Voice — talk, video, screen share</option></select></label><div class="row"><button class="btn primary">Create</button></div></form>`);
   $('#cc', m).onsubmit = (e) => { e.preventDefault(); tryRun(async () => { const c = await api(`/servers/${s.id}/channels`, { body: Object.fromEntries(new FormData(e.target)) }); closeModal(); if (c.type !== 'voice') setTimeout(() => openChannel(s.id, c.id), 200); }); };
 }
 function editChannelModal(s, c) {
@@ -638,7 +638,7 @@ function settingsModal(tab = 'profile') {
     m.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
     if (t === 'profile') {
       body.innerHTML = `<div style="display:flex;gap:20px;flex-wrap:wrap"><form id="pf" style="flex:1;min-width:260px"><label>Display name<input name="display_name" value="${esc(u.display_name)}" maxlength="32"></label>
-        <label>Pronouns<input name="pronouns" value="${esc(u.pronouns || '')}" maxlength="40"></label><label>Custom status<input name="custom_status" value="${esc(u.custom_status || '')}" placeholder="🎮 Playing Roblox"></label>
+        <label>Pronouns<input name="pronouns" value="${esc(u.pronouns || '')}" maxlength="40"></label><label>Custom status<input name="custom_status" value="${esc(u.custom_status || '')}" placeholder="Playing Roblox"></label>
         <label>About me<textarea name="bio" rows="3" maxlength="400">${esc(u.bio || '')}</textarea></label><label>Avatar (images or GIFs, free)<input type="file" name="avatar" accept="image/*"></label>
         <label>Banner (images or GIFs, free)<input type="file" name="banner" accept="image/*"></label><label>Name font (free)<select name="name_font"><option value="">Default</option>${NAME_FONTS.map((f) => `<option value="${f[0]}" ${u.name_font === f[0] ? 'selected' : ''}>${f[1]}</option>`).join('')}</select></label>
         <label>Connections <span class="small muted">(shown on your profile)</span><div id="conn-list"></div><button type="button" class="btn sm" id="conn-add" style="margin-top:6px">+ Add connection</button></label>
@@ -649,7 +649,7 @@ function settingsModal(tab = 'profile') {
       prev(); let color = u.banner_color;
       body.querySelectorAll('[data-color]').forEach((b) => (b.onclick = () => { color = b.dataset.color; body.querySelectorAll('[data-color]').forEach((x) => x.classList.toggle('on', x === b)); }));
       $('#go-shop') .onclick = () => shopModal();
-      const connRow = (c = { type: 'youtube', name: '' }) => { const d0 = document.createElement('div'); d0.className = 'conn-row'; d0.innerHTML = `<select>${Object.keys(CONN_ICONS).map((k) => `<option value="${k}" ${c.type === k ? 'selected' : ''}>${CONN_ICONS[k]} ${k}</option>`).join('')}</select><input placeholder="your name there" value="${esc(c.name)}" maxlength="60"><button type="button" class="btn sm">✕</button>`; d0.querySelector('button').onclick = () => d0.remove(); $('#conn-list').appendChild(d0); };
+      const connRow = (c = { type: 'youtube', name: '' }) => { const d0 = document.createElement('div'); d0.className = 'conn-row'; d0.innerHTML = `<select>${Object.keys(CONN_ICONS).map((k) => `<option value="${k}" ${c.type === k ? 'selected' : ''}>${k[0].toUpperCase() + k.slice(1)}</option>`).join('')}</select><input placeholder="your name there" value="${esc(c.name)}" maxlength="60"><button type="button" class="btn sm">✕</button>`; d0.querySelector('button').onclick = () => d0.remove(); $('#conn-list').appendChild(d0); };
       (u.connections || []).forEach(connRow); $('#conn-add').onclick = () => connRow();
       const patch = async (bd) => { const nu = await api('/me', { method: 'PATCH', body: bd }); Object.assign(S.me, nu); cacheUser(nu); renderMe(); draw('profile'); toast('Saved'); };
       $('#rm-av') && ($('#rm-av').onclick = () => tryRun(() => patch({ avatar: null }))); $('#rm-bn') && ($('#rm-bn').onclick = () => tryRun(() => patch({ banner: null })));
