@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: zuno
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: GIPHY_API_KEY
+        sync: false
