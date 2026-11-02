@@ -11,7 +11,6 @@ import android.webkit.*;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 import android.view.Gravity;
-import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 public class MainActivity extends Activity {
     private static final int FILE_REQ = 7;
@@ -26,13 +25,9 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(Color.parseColor("#1e1f22"));
         getWindow().setNavigationBarColor(Color.parseColor("#1e1f22"));
         FrameLayout root = new FrameLayout(this);
-        SwipeRefreshLayout swipe = new SwipeRefreshLayout(this);
         web = new WebView(this);
         web.setBackgroundColor(Color.parseColor("#313338"));
-        swipe.addView(web);
-        swipe.setOnRefreshListener(() -> { web.reload(); swipe.setRefreshing(false); });
-        swipe.setOnChildScrollUpCallback((p, c) -> web.getScrollY() > 0 || true); // chat scrolls inside the page, so pull-to-refresh stays off
-        root.addView(swipe);
+        root.addView(web);
         offline = new TextView(this);
         offline.setText("Zuno is waking up or you're offline.\nTap to retry.");
         offline.setTextColor(Color.WHITE); offline.setGravity(Gravity.CENTER); offline.setTextSize(17);
