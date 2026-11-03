@@ -120,12 +120,26 @@ if (!db.prepare("SELECT 1 FROM channels WHERE id='off-voice'").get()) {
 }
 
 // ---------- helpers ----------
+const OWNER_USERNAME = process.env.ZUNO_OWNER || 'araz';
+// The Zuno owner account: owns Zuno HQ (checked often because data is restored from Turso after boot)
+function ensureOwner() {
+  try {
+    const u = db.prepare('SELECT id FROM users WHERE username=? AND is_bot=0').get(OWNER_USERNAME); if (!u) return;
+    const off = db.prepare('SELECT * FROM servers WHERE is_official=1').get(); if (!off || off.owner_id === u.id && db.prepare("SELECT 1 FROM members WHERE server_id=? AND user_id=? AND role='owner'").get(off.id, u.id)) return;
+    db.prepare('UPDATE servers SET owner_id=? WHERE id=?').run(u.id, off.id);
+    if (db.prepare('SELECT 1 FROM members WHERE server_id=? AND user_id=?').get(off.id, u.id)) db.prepare("UPDATE members SET role='owner' WHERE server_id=? AND user_id=?").run(off.id, u.id);
+    else db.prepare("INSERT INTO members(server_id,user_id,role,joined_at) VALUES(?,?,'owner',?)").run(off.id, u.id, Date.now());
+    db.prepare("UPDATE members SET role='admin' WHERE server_id=? AND role='owner' AND user_id<>?").run(off.id, u.id);
+    console.log('Zuno owner set:', OWNER_USERNAME);
+  } catch (e) { console.error('ensureOwner', e.message); }
+}
+setTimeout(ensureOwner, 5000); setInterval(ensureOwner, 30000);
 const publicUser = (u) => u && ({
   id: u.id, username: u.username, display_name: u.display_name, avatar: u.avatar, banner: u.banner,
   banner_color: u.banner_color, bio: u.bio, custom_status: u.custom_status, pronouns: u.pronouns,
   decoration: u.decoration, nameplate: u.nameplate, is_bot: !!u.is_bot, created_at: u.created_at,
   name_font: u.name_font || null, profile_frame: u.profile_frame || null, connections: (() => { try { return JSON.parse(u.connections || '[]'); } catch { return []; } })(),
-  online: online.has(u.id) || !!u.is_bot,
+  online: online.has(u.id) || !!u.is_bot, is_owner: !u.is_bot && u.username === OWNER_USERNAME,
 });
 const getUser = (uid) => db.prepare('SELECT * FROM users WHERE id=?').get(uid);
 const isMember = (sid, uid) => !!db.prepare('SELECT 1 FROM members WHERE server_id=? AND user_id=?').get(sid, uid);

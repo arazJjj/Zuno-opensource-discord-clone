@@ -316,7 +316,7 @@ function msgEl(m, first) {
   const role = S.view.server && S.members[S.view.server]?.find((x) => x.id === m.author_id)?.role;
   el.innerHTML = `${first ? `<div style="cursor:pointer" data-prof="${a.id}">${avatar(a, 40)}</div>` : `<div class="gutter">${new Date(m.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>`}
     <div class="body">${m.reply ? `<div class="reply-ref" data-jump="${m.reply.id}">${avatar(m.reply.author, 16)}<b>${esc(m.reply.author?.display_name)}</b> <span>${esc(m.reply.content || 'Attachment')}</span></div>` : ''}
-    ${first ? `<div class="meta"><span class="name${a.name_font ? ' font-' + esc(a.name_font) : ''}" data-prof="${a.id}" style="${role === 'owner' ? 'color:#f0b232' : role === 'admin' ? 'color:#eb459e' : ''}">${esc(a.display_name)}</span>${a.is_bot ? '<span class="tag">BOT</span>' : ''}${role === 'owner' ? ' 👑' : ''}<span class="time">${fmtTime(m.created_at)}</span>${m.pinned ? '<span title="Pinned">📌</span>' : ''}</div>` : ''}
+    ${first ? `<div class="meta"><span class="name${a.name_font ? ' font-' + esc(a.name_font) : ''}" data-prof="${a.id}" style="${role === 'owner' ? 'color:#f0b232' : role === 'admin' ? 'color:#eb459e' : ''}">${esc(a.display_name)}</span>${a.is_owner ? '<span class="tag owner" title="Zuno owner">OWNER</span>' : ''}${a.is_bot ? '<span class="tag">BOT</span>' : ''}${role === 'owner' ? ' 👑' : ''}<span class="time">${fmtTime(m.created_at)}</span>${m.pinned ? '<span title="Pinned">📌</span>' : ''}</div>` : ''}
     ${content ? `<div class="text">${markdown(content)}${m.edited_at ? ' <span class="edited">(edited)</span>' : ''}</div>` : ''}
     ${m.poll ? pollHtml(m) : ''}
     ${atts.length ? `<div class="attach">${atts.map((x) => x.sticker ? `<img class="sticker" src="${esc(x.url)}" alt="${esc(x.name || 'sticker')}">` : x.type?.startsWith('image') || x.gif ? `<img src="${esc(x.url)}" alt="${esc(x.name || 'image')}" data-light loading="lazy">` :
@@ -483,7 +483,7 @@ async function profilePopover(uid, x, y) {
   const u = await api('/users/' + uid).catch(() => null); if (!u) return; cacheUser(u);
   const me = u.id === S.me.id; const fr = S.friends.find((f) => f.user.id === u.id);
   showPop(`<div class="profile-card${frameClass(u)}"><div class="banner" style="background:${u.banner ? `url('${esc(u.banner)}') center/cover` : esc(u.banner_color)}"></div>
-    <div class="pc-body">${avatar(u, 88, true)}<div class="pc-inner${plateClass(u)}"><h3 class="${u.name_font ? 'font-' + esc(u.name_font) : ''}">${esc(u.display_name)} ${u.is_bot ? '<span class="tag">BOT</span>' : ''}</h3><div class="muted">@${esc(u.username)}${u.pronouns ? ' • ' + esc(u.pronouns) : ''}</div>
+    <div class="pc-body">${avatar(u, 88, true)}<div class="pc-inner${plateClass(u)}"><h3 class="${u.name_font ? 'font-' + esc(u.name_font) : ''}">${esc(u.display_name)} ${u.is_bot ? '<span class="tag">BOT</span>' : ''}${u.is_owner ? '<span class="tag owner">OWNER</span>' : ''}</h3><div class="muted">@${esc(u.username)}${u.pronouns ? ' • ' + esc(u.pronouns) : ''}</div>
     ${u.custom_status ? `<div style="margin-top:6px">${esc(u.custom_status)}</div>` : ''}
     ${u.bio ? `<div class="side-cat" style="padding-left:0">About me</div><div class="small" style="white-space:pre-wrap">${markdown(u.bio)}</div>` : ''}
     ${u.connections?.length ? `<div class="side-cat" style="padding-left:0">Connections</div><div class="conns">${u.connections.map((c) => `<span class="conn">${CONN_ICONS[c.type] || '🔗'} ${esc(c.name)}</span>`).join('')}</div>` : ''}
@@ -508,7 +508,7 @@ function renderMembers() {
     ['Online', ms.filter((m) => m.role === 'member' && !m.is_bot && m.online)], ['Offline', ms.filter((m) => m.role === 'member' && !m.is_bot && !m.online)]];
   box.innerHTML = groups.filter((g) => g[1].length).map(([t, l]) => `<h4>${t} — ${l.length}</h4>` + l.map(memberRow).join('')).join('');
 }
-function memberRow(m) { const u = S.users[m.id] || m; return `<div class="member ${u.online || u.is_bot ? '' : 'off'}${plateClass(u)}" data-member="${m.id}">${avatar(u, 32, true)}<div style="min-width:0"><div>${esc(u.display_name)} ${u.is_bot ? '<span class="tag">BOT</span>' : ''}</div><div class="st">${esc(u.custom_status || '')}</div></div></div>`; }
+function memberRow(m) { const u = S.users[m.id] || m; return `<div class="member ${u.online || u.is_bot ? '' : 'off'}${plateClass(u)}" data-member="${m.id}">${avatar(u, 32, true)}<div style="min-width:0"><div>${esc(u.display_name)} ${u.is_owner ? '<span class="tag owner">OWNER</span>' : ''}${u.is_bot ? '<span class="tag">BOT</span>' : ''}</div><div class="st">${esc(u.custom_status || '')}</div></div></div>`; }
 $('#members').addEventListener('click', (e) => { const r = e.target.closest('[data-member]'); if (r) profilePopover(r.dataset.member, e.clientX - 360, e.clientY); });
 $('#members').addEventListener('contextmenu', (e) => {
   const r = e.target.closest('[data-member]'); const s = curServer(); if (!r || !s || !['owner', 'admin'].includes(s.my_role) || r.dataset.member === S.me.id) return; e.preventDefault();
