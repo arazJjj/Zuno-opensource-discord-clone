@@ -56,6 +56,10 @@ CREATE TABLE IF NOT EXISTS scheduled(id TEXT PRIMARY KEY, author_id TEXT, channe
 CREATE TABLE IF NOT EXISTS event_rsvps(event_id TEXT, user_id TEXT, PRIMARY KEY(event_id,user_id));
 CREATE INDEX IF NOT EXISTS idx_msg_thread ON messages(thread_id, created_at);
 `);
+// ---------- 1.2 migrations: lobby, join control, interests, shards ----------
+for (const sql of ['ALTER TABLE servers ADD COLUMN lobby TEXT', "ALTER TABLE servers ADD COLUMN join_mode TEXT DEFAULT 'open'", "ALTER TABLE servers ADD COLUMN join_questions TEXT DEFAULT '[]'",
+  "ALTER TABLE users ADD COLUMN interests TEXT DEFAULT '[]'", 'ALTER TABLE users ADD COLUMN shards INTEGER DEFAULT 0', 'ALTER TABLE users ADD COLUMN streak INTEGER DEFAULT 0', 'ALTER TABLE users ADD COLUMN last_daily TEXT']) { try { db.exec(sql); } catch {} }
+db.exec(`CREATE TABLE IF NOT EXISTS join_requests(server_id TEXT, user_id TEXT, answers TEXT DEFAULT '[]', status TEXT DEFAULT 'pending', created_at INTEGER, PRIMARY KEY(server_id,user_id));`);
 
 const id = () => crypto.randomBytes(9).toString('base64url');
 const now = () => Date.now();
@@ -140,7 +144,16 @@ const publicUser = (u) => u && ({
   decoration: u.decoration, nameplate: u.nameplate, is_bot: !!u.is_bot, created_at: u.created_at,
   name_font: u.name_font || null, profile_frame: u.profile_frame || null, connections: (() => { try { return JSON.parse(u.connections || '[]'); } catch { return []; } })(),
   online: online.has(u.id) || !!u.is_bot, is_owner: !u.is_bot && u.username === OWNER_USERNAME,
+  interests: (() => { try { return JSON.parse(u.interests || '[]'); } catch { return []; } })(),
+  shards: u.shards || 0, shard_level: shardLevel(u.shards || 0), streak: u.streak || 0,
 });
+// Shards: free points for daily streaks and activity. Level grows with total shards.
+function shardLevel(n) { return Math.floor(Math.sqrt((n || 0) / 25)); }
+const shardCooldown = new Map();
+function awardShards(uid, n, cooldownMs = 0) {
+  if (cooldownMs) { const last = shardCooldown.get(uid) || 0; if (Date.now() - last < cooldownMs) return; shardCooldown.set(uid, Date.now()); }
+  db.prepare('UPDATE users SET shards=COALESCE(shards,0)+? WHERE id=?').run(n, uid);
+}
 const getUser = (uid) => db.prepare('SELECT * FROM users WHERE id=?').get(uid);
 const isMember = (sid, uid) => !!db.prepare('SELECT 1 FROM members WHERE server_id=? AND user_id=?').get(sid, uid);
 const memberRole = (sid, uid) => db.prepare('SELECT role FROM members WHERE server_id=? AND user_id=?').get(sid, uid)?.role;
@@ -173,11 +186,11 @@ function joinServer(sid, uid, role = 'member') {
   io.to('server:' + sid).emit('member:join', { server_id: sid, user: publicUser(getUser(uid)) });
 }
 
-function createMessage({ channel_id = null, dm_id = null, author_id, content = '', attachments = [], reply_to = null, thread_id = null, poll = null }) {
+function createMessage({ channel_id = null, dm_id = null, author_id, content = '', attachments = [], reply_to = null, thread_id = null, poll = null, thread_name = null }) {
   const m = { id: id(), channel_id, dm_id, author_id, content: String(content).slice(0, 4000),
-    attachments: JSON.stringify(attachments), reply_to, thread_id, poll: poll ? JSON.stringify(poll) : null, created_at: now() };
-  db.prepare(`INSERT INTO messages(id,channel_id,dm_id,author_id,content,attachments,reply_to,thread_id,poll,created_at)
-    VALUES(@id,@channel_id,@dm_id,@author_id,@content,@attachments,@reply_to,@thread_id,@poll,@created_at)`).run(m);
+    attachments: JSON.stringify(attachments), reply_to, thread_id, poll: poll ? JSON.stringify(poll) : null, thread_name: thread_name ? String(thread_name).slice(0, 100) : null, created_at: now() };
+  db.prepare(`INSERT INTO messages(id,channel_id,dm_id,author_id,content,attachments,reply_to,thread_id,poll,thread_name,created_at)
+    VALUES(@id,@channel_id,@dm_id,@author_id,@content,@attachments,@reply_to,@thread_id,@poll,@thread_name,@created_at)`).run(m);
   if (thread_id) setImmediate(() => { const parent = db.prepare('SELECT * FROM messages WHERE id=?').get(thread_id); if (parent) broadcastMessage(parent, 'message:update', hydrateMessage(parent)); });
   const full = hydrateMessage(db.prepare('SELECT * FROM messages WHERE id=?').get(m.id));
   const room = channel_id ? 'channel:' + channel_id : 'dm:' + dm_id;
@@ -187,7 +200,7 @@ function createMessage({ channel_id = null, dm_id = null, author_id, content = '
   } else {
     for (const r of db.prepare('SELECT user_id FROM dm_members WHERE dm_id=?').all(dm_id)) io.to('user:' + r.user_id).emit('message:new', full);
   }
-  if (!getUser(author_id)?.is_bot) setImmediate(() => runBots(full));
+  if (!getUser(author_id)?.is_bot) { setImmediate(() => runBots(full)); awardShards(author_id, 2, 60000); }
   if (channel_id && !getUser(author_id)?.is_bot) awardXp(channel(channel_id).server_id, author_id);
   return full;
 }
@@ -310,10 +323,10 @@ app.get('/api/bootstrap', auth, (req, res) => {
   const uid = req.user.id;
   const servers = db.prepare('SELECT s.* FROM servers s JOIN members m ON m.server_id=s.id WHERE m.user_id=? ORDER BY s.is_official DESC, m.joined_at').all(uid)
     .map((s) => ({ ...s, channels: db.prepare('SELECT * FROM channels WHERE server_id=? ORDER BY position').all(s.id), my_role: memberRole(s.id, uid) }));
-  res.json({ me: { ...publicUser(req.user), email: req.user.email, theme: req.user.theme }, servers, dms: listDms(uid), friends: listFriends(uid),
+  res.json({ me: { ...publicUser(req.user), email: req.user.email, theme: req.user.theme, daily_claimed: req.user.last_daily === new Date().toISOString().slice(0, 10) }, servers, dms: listDms(uid), friends: listFriends(uid),
     inventory: db.prepare('SELECT item_id FROM inventory WHERE user_id=?').all(uid).map((r) => r.item_id), shop: SHOP,
     emojis: myEmojis(uid), bots: db.prepare('SELECT * FROM users WHERE bot_owner=?').all(uid).map((b) => ({ ...publicUser(b), commands: db.prepare('SELECT trigger,response FROM bot_commands WHERE bot_id=?').all(b.id) })),
-    gifs_enabled: !!(process.env.TENOR_API_KEY || process.env.GIPHY_API_KEY),
+    gifs_enabled: !!(process.env.KLIPY_API_KEY || process.env.TENOR_API_KEY || process.env.GIPHY_API_KEY),
     reads: Object.fromEntries(db.prepare('SELECT target_id,last_read FROM reads WHERE user_id=?').all(uid).map((r) => [r.target_id, r.last_read])) });
 });
 
@@ -321,6 +334,7 @@ app.get('/api/bootstrap', auth, (req, res) => {
 app.patch('/api/me', auth, (req, res) => {
   const allowed = ['display_name', 'bio', 'custom_status', 'pronouns', 'banner_color', 'avatar', 'banner', 'theme', 'decoration', 'nameplate', 'name_font', 'profile_frame'];
   if (Array.isArray(req.body.connections)) db.prepare('UPDATE users SET connections=? WHERE id=?').run(JSON.stringify(req.body.connections.slice(0, 8).map((c) => ({ type: String(c.type || '').slice(0, 20), name: String(c.name || '').slice(0, 60) })).filter((c) => c.name)), req.user.id);
+  if (Array.isArray(req.body.interests)) db.prepare('UPDATE users SET interests=? WHERE id=?').run(JSON.stringify([...new Set(req.body.interests.map((t) => String(t || '').trim().slice(0, 30)).filter(Boolean))].slice(0, 20)), req.user.id);
   if (req.body.username != null && String(req.body.username).toLowerCase().trim() !== req.user.username) {
     const un = String(req.body.username).toLowerCase().trim();
     if (!/^[a-z0-9_.]{2,32}$/.test(un)) return err(res, 'Username: 2-32 letters, numbers, _ or .');
@@ -360,10 +374,25 @@ app.post('/api/shop/:item/claim', auth, (req, res) => {
   res.json({ ok: true });
 });
 
-// GIFs (Tenor or GIPHY; set TENOR_API_KEY or GIPHY_API_KEY)
+// GIFs: KLIPY (free Tenor replacement, set KLIPY_API_KEY). Tenor/GIPHY keys still work as fallbacks.
+// KLIPY docs: GET https://api.klipy.com/api/v1/{app_key}/gifs/search?q=&page=&per_page=&customer_id=  (and /gifs/trending)
 app.get('/api/gifs', auth, async (req, res) => {
   const q = String(req.query.q || '').slice(0, 100);
   try {
+    if (process.env.KLIPY_API_KEY) {
+      const base = `https://api.klipy.com/api/v1/${encodeURIComponent(process.env.KLIPY_API_KEY)}/gifs/`;
+      const qs = new URLSearchParams({ page: '1', per_page: '30', customer_id: req.user.id, content_filter: 'medium' });
+      if (q) qs.set('q', q);
+      const r = await fetch(base + (q ? 'search' : 'trending') + '?' + qs, { signal: AbortSignal.timeout(8000) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.result === false) { console.warn('KLIPY error', r.status, JSON.stringify(j).slice(0, 200)); return err(res, 'GIF search failed', 502); }
+      const raw = Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : Array.isArray(j.results) ? j.results : null;
+      if (!raw) { console.warn('KLIPY: unexpected response shape', JSON.stringify(j).slice(0, 300)); return res.json([]); }
+      const list = raw.filter((g) => g && g.file && g.type !== 'ad');
+      if (raw.length && !list.length) console.warn('KLIPY: items had no file field', JSON.stringify(raw[0]).slice(0, 300));
+      const pick = (f, sizes) => { for (const sz of sizes) { const u = f?.[sz]?.gif?.url || f?.[sz]?.webp?.url; if (u) return u; } return null; };
+      return res.json(list.map((g) => ({ id: String(g.id), title: g.title || '', preview: pick(g.file, ['sm', 'xs', 'md', 'hd']), url: pick(g.file, ['md', 'hd', 'sm']) })).filter((g) => g.url));
+    }
     if (process.env.TENOR_API_KEY) {
       const url = q ? `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(q)}&key=${process.env.TENOR_API_KEY}&client_key=zuno&limit=30&media_filter=gif,tinygif`
                     : `https://tenor.googleapis.com/v2/featured?key=${process.env.TENOR_API_KEY}&client_key=zuno&limit=30&media_filter=gif,tinygif`;
@@ -405,19 +434,63 @@ app.get('/api/servers/discover', auth, (req, res) => {
 app.post('/api/servers/:id/join', auth, (req, res) => {
   const s = db.prepare('SELECT * FROM servers WHERE id=? AND is_public=1').get(req.params.id);
   if (!s) return err(res, 'Server not found', 404);
+  if (needsApplication(s, req.user.id)) return res.json(applicationInfo(s, req.user.id));
   joinServer(s.id, req.user.id); res.json(serverFull(s.id, req.user.id));
 });
 app.post('/api/invite/:code', auth, (req, res) => {
   const c = String(req.params.code).replace(/.*\//, '');
   const s = db.prepare('SELECT * FROM servers WHERE invite_code=?').get(c);
   if (!s) return err(res, 'That invite is invalid or expired', 404);
+  if (needsApplication(s, req.user.id)) return res.json(applicationInfo(s, req.user.id));
   joinServer(s.id, req.user.id); res.json(serverFull(s.id, req.user.id));
+});
+// ---------- join control: anyone with the link, or apply and get approved ----------
+function needsApplication(s, uid) { return s.join_mode === 'apply' && !s.is_official && !isMember(s.id, uid); }
+function applicationInfo(s, uid) {
+  const r = db.prepare('SELECT status FROM join_requests WHERE server_id=? AND user_id=?').get(s.id, uid);
+  let questions = []; try { questions = JSON.parse(s.join_questions || '[]'); } catch {}
+  return { needs_application: true, status: r?.status || null, server: { id: s.id, name: s.name, icon: s.icon, description: s.description, questions } };
+}
+const managersOf = (sid) => db.prepare("SELECT user_id FROM members WHERE server_id=? AND role IN ('owner','admin')").all(sid).map((r) => r.user_id);
+app.post('/api/servers/:id/apply', auth, (req, res) => {
+  const s = db.prepare('SELECT * FROM servers WHERE id=?').get(req.params.id); if (!s) return err(res, 'Server not found', 404);
+  if (isMember(s.id, req.user.id)) return res.json(serverFull(s.id, req.user.id));
+  if (s.join_mode !== 'apply') { joinServer(s.id, req.user.id); return res.json(serverFull(s.id, req.user.id)); }
+  const answers = (Array.isArray(req.body.answers) ? req.body.answers : []).map((a) => String(a || '').slice(0, 500)).slice(0, 5);
+  db.prepare("INSERT OR REPLACE INTO join_requests(server_id,user_id,answers,status,created_at) VALUES(?,?,?,'pending',?)").run(s.id, req.user.id, JSON.stringify(answers), now());
+  managersOf(s.id).forEach((u) => io.to('user:' + u).emit('joinreq:new', { server_id: s.id, user: publicUser(req.user) }));
+  res.json({ applied: true });
+});
+app.get('/api/servers/:id/requests', auth, (req, res) => {
+  if (!canManage(req.params.id, req.user.id)) return err(res, 'Only admins can see join requests', 403);
+  const s = db.prepare('SELECT join_questions FROM servers WHERE id=?').get(req.params.id); let questions = []; try { questions = JSON.parse(s?.join_questions || '[]'); } catch {}
+  res.json({ questions, requests: db.prepare("SELECT * FROM join_requests WHERE server_id=? AND status='pending' ORDER BY created_at").all(req.params.id)
+    .map((r) => ({ user: publicUser(getUser(r.user_id)), answers: JSON.parse(r.answers || '[]'), created_at: r.created_at })).filter((r) => r.user) });
+});
+app.post('/api/servers/:id/requests/:uid', auth, (req, res) => {
+  if (!canManage(req.params.id, req.user.id)) return err(res, 'Only admins can do that', 403);
+  const r = db.prepare('SELECT * FROM join_requests WHERE server_id=? AND user_id=?').get(req.params.id, req.params.uid); if (!r) return err(res, 'Request not found', 404);
+  const ok = req.body.action === 'accept';
+  db.prepare('UPDATE join_requests SET status=? WHERE server_id=? AND user_id=?').run(ok ? 'accepted' : 'rejected', req.params.id, req.params.uid);
+  if (ok) { joinServer(req.params.id, req.params.uid); io.to('user:' + req.params.uid).emit('server:added', serverFull(req.params.id, req.params.uid)); }
+  else io.to('user:' + req.params.uid).emit('joinreq:rejected', { server_id: req.params.id });
+  res.json({ ok: true });
 });
 app.patch('/api/servers/:id', auth, (req, res) => {
   if (!canManage(req.params.id, req.user.id)) return err(res, 'Only admins can do that', 403);
   for (const k of ['name', 'icon', 'banner', 'description']) if (k in req.body) db.prepare(`UPDATE servers SET ${k}=? WHERE id=?`).run(String(req.body[k] ?? '').slice(0, 300) || null, req.params.id);
   if ('is_public' in req.body) db.prepare('UPDATE servers SET is_public=? WHERE id=?').run(req.body.is_public ? 1 : 0, req.params.id);
   if (req.body.new_invite) db.prepare('UPDATE servers SET invite_code=? WHERE id=?').run(code(), req.params.id);
+  if (req.body.lobby && typeof req.body.lobby === 'object') {
+    const L = req.body.lobby, col = (c, d) => (/^#[0-9a-f]{6}$/i.test(String(c || '')) ? c : d);
+    const chIds = new Set(db.prepare('SELECT id FROM channels WHERE server_id=?').all(req.params.id).map((c) => c.id));
+    const lobby = { enabled: L.enabled !== false, banner_color: col(L.banner_color, '#5865f2'), accent: col(L.accent, '#5865f2'), tagline: String(L.tagline || '').slice(0, 160),
+      buttons: (Array.isArray(L.buttons) ? L.buttons : []).filter((b) => b && chIds.has(b.channel_id)).slice(0, 4).map((b) => ({ label: String(b.label || '').slice(0, 30) || 'Open', channel_id: b.channel_id })),
+      featured: (Array.isArray(L.featured) ? L.featured : []).filter((c) => chIds.has(c)).slice(0, 6), rules: String(L.rules || '').slice(0, 2000) };
+    db.prepare('UPDATE servers SET lobby=? WHERE id=?').run(JSON.stringify(lobby), req.params.id);
+  }
+  if (['open', 'apply'].includes(req.body.join_mode)) db.prepare('UPDATE servers SET join_mode=? WHERE id=?').run(req.body.join_mode, req.params.id);
+  if (Array.isArray(req.body.join_questions)) db.prepare('UPDATE servers SET join_questions=? WHERE id=?').run(JSON.stringify(req.body.join_questions.map((q) => String(q || '').trim().slice(0, 200)).filter(Boolean).slice(0, 5)), req.params.id);
   const s = serverFull(req.params.id, req.user.id); io.to('server:' + s.id).emit('server:update', s); res.json(s);
 });
 app.delete('/api/servers/:id', auth, (req, res) => {
@@ -460,7 +533,7 @@ app.post('/api/servers/:id/channels', auth, (req, res) => {
   if (!name) return err(res, 'Channel needs a name');
   const pos = db.prepare('SELECT COALESCE(MAX(position),0)+1 p FROM channels WHERE server_id=?').get(req.params.id).p;
   const cid = id();
-  db.prepare('INSERT INTO channels(id,server_id,name,topic,type,position) VALUES(?,?,?,?,?,?)').run(cid, req.params.id, name, String(req.body.topic || ''), ['announcement', 'voice'].includes(req.body.type) ? req.body.type : 'text', pos);
+  db.prepare('INSERT INTO channels(id,server_id,name,topic,type,position) VALUES(?,?,?,?,?,?)').run(cid, req.params.id, name, String(req.body.topic || ''), ['announcement', 'voice', 'forum'].includes(req.body.type) ? req.body.type : 'text', pos);
   const s = serverFull(req.params.id, req.user.id); io.to('server:' + s.id).emit('server:update', s); res.json(channel(cid));
 });
 app.patch('/api/channels/:id', auth, (req, res) => {
@@ -502,9 +575,13 @@ app.post('/api/messages', auth, (req, res) => {
   let { channel_id, dm_id, content, attachments, reply_to, thread_id, poll } = req.body || {};
   if (thread_id) { const parent = db.prepare('SELECT * FROM messages WHERE id=?').get(thread_id); if (!parent || parent.thread_id) return err(res, 'Thread not found', 404); channel_id = parent.channel_id; dm_id = parent.dm_id; }
   if (poll) { const q = String(poll.question || '').trim().slice(0, 300); const opts = (Array.isArray(poll.options) ? poll.options : []).map((o) => String(o).trim().slice(0, 100)).filter(Boolean).slice(0, 10);
-    if (!q || opts.length < 2) return err(res, 'A poll needs a question and at least 2 answers'); poll = { question: q, options: opts, multi: !!poll.multi }; } else poll = null;
+    if (!q || opts.length < 2) return err(res, 'A poll needs a question and at least 2 answers'); const quiz = !!poll.quiz; const answer = Number(poll.answer);
+    if (quiz && !(answer >= 0 && answer < opts.length)) return err(res, 'Pick the correct answer for your quiz');
+    poll = quiz ? { question: q, options: opts, multi: false, quiz: true, answer } : { question: q, options: opts, multi: !!poll.multi }; } else poll = null;
   if (!canSee(req, { channel_id, dm_id })) return err(res, 'No access', 403);
-  if (channel_id) { const ch = channel(channel_id); if (ch.type === 'announcement' && !canManage(ch.server_id, req.user.id)) return err(res, 'Only admins can post here', 403); }
+  let thread_name = null;
+  if (channel_id) { const ch = channel(channel_id); if (ch.type === 'announcement' && !canManage(ch.server_id, req.user.id)) return err(res, 'Only admins can post here', 403);
+    if (ch.type === 'forum' && !thread_id) { thread_name = String(req.body.title || '').trim().slice(0, 100); if (!thread_name) return err(res, 'Give your post a title'); } }
   if (dm_id) { // blocked?
     const others = db.prepare('SELECT user_id FROM dm_members WHERE dm_id=? AND user_id<>?').all(dm_id, req.user.id);
     const d = db.prepare('SELECT is_group FROM dms WHERE id=?').get(dm_id);
@@ -512,7 +589,7 @@ app.post('/api/messages', auth, (req, res) => {
   }
   const att = Array.isArray(attachments) ? attachments.slice(0, 10).filter((a) => a && typeof a.url === 'string').map((a) => ({ url: a.url, name: String(a.name || ''), type: String(a.type || ''), gif: !!a.gif, sticker: !!a.sticker })) : [];
   if (!String(content || '').trim() && !att.length && !poll) return err(res, 'Empty message');
-  res.json(createMessage({ channel_id: channel_id || null, dm_id: dm_id || null, author_id: req.user.id, content, attachments: att, reply_to: reply_to || null, thread_id: thread_id || null, poll }));
+  res.json(createMessage({ channel_id: channel_id || null, dm_id: dm_id || null, author_id: req.user.id, content, attachments: att, reply_to: reply_to || null, thread_id: thread_id || null, poll, thread_name }));
 });
 function broadcastMessage(m, event, payload) {
   if (m.channel_id) io.to('server:' + channel(m.channel_id).server_id).emit(event, payload);
@@ -636,6 +713,30 @@ app.post('/api/friends/:uid/:action', auth, (req, res) => {
   pushFriends(a, b); res.json({ ok: true });
 });
 
+// suggested friends: people you share servers and interests with
+app.get('/api/friends/suggested', auth, (req, res) => {
+  const me = req.user.id; const mine = new Set((publicUser(req.user).interests || []).map((t) => t.toLowerCase()));
+  const skip = new Set([me, ...db.prepare('SELECT user_id, friend_id FROM friends WHERE user_id=? OR friend_id=?').all(me, me).flatMap((r) => [r.user_id, r.friend_id]),
+    ...db.prepare('SELECT blocked_id b FROM blocks WHERE user_id=? UNION SELECT user_id b FROM blocks WHERE blocked_id=?').all(me, me).map((r) => r.b)]);
+  const shared = db.prepare(`SELECT b.user_id uid, COUNT(*) n FROM members a JOIN members b ON a.server_id=b.server_id AND b.user_id<>a.user_id WHERE a.user_id=? GROUP BY b.user_id`).all(me);
+  const out = [];
+  for (const r of shared) {
+    if (skip.has(r.uid)) continue; const u = getUser(r.uid); if (!u || u.is_bot) continue;
+    const pu = publicUser(u); const common = (pu.interests || []).filter((t) => mine.has(t.toLowerCase()));
+    out.push({ user: pu, shared_servers: r.n, shared_interests: common, score: r.n * 2 + common.length * 3 + (pu.online ? 1 : 0) });
+  }
+  res.json(out.sort((a, b) => b.score - a.score).slice(0, 20));
+});
+// Shards: claim once per day; streak grows when you come back the next day
+app.post('/api/shards/daily', auth, (req, res) => {
+  const u = getUser(req.user.id); const today = new Date().toISOString().slice(0, 10);
+  if (u.last_daily === today) return res.json({ claimed: false, ...publicUser(u) });
+  const yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+  const streak = u.last_daily === yesterday ? (u.streak || 0) + 1 : 1; const gain = 20 + 5 * Math.min(streak - 1, 10);
+  db.prepare('UPDATE users SET shards=COALESCE(shards,0)+?, streak=?, last_daily=? WHERE id=?').run(gain, streak, today, u.id);
+  const nu = publicUser(getUser(u.id)); io.emit('user:update', nu); res.json({ claimed: true, gain, ...nu });
+});
+
 // no-code bots
 app.post('/api/bots', auth, (req, res) => {
   if (req.user.is_bot) return err(res, 'Bots cannot make bots');
@@ -672,6 +773,7 @@ app.post('/api/messages/:id/vote', auth, (req, res) => {
   if (!m || !m.poll || !canSee(req, m)) return err(res, 'Poll not found', 404);
   const p = JSON.parse(m.poll); const opt = Number(req.body.option);
   if (!(opt >= 0 && opt < p.options.length)) return err(res, 'Bad option');
+  if (p.quiz && db.prepare('SELECT 1 FROM poll_votes WHERE message_id=? AND user_id=?').get(m.id, req.user.id)) return err(res, 'You already answered this quiz');
   const has = db.prepare('SELECT 1 FROM poll_votes WHERE message_id=? AND user_id=? AND opt=?').get(m.id, req.user.id, opt);
   if (has) db.prepare('DELETE FROM poll_votes WHERE message_id=? AND user_id=? AND opt=?').run(m.id, req.user.id, opt);
   else { if (!p.multi) db.prepare('DELETE FROM poll_votes WHERE message_id=? AND user_id=?').run(m.id, req.user.id); db.prepare('INSERT INTO poll_votes VALUES(?,?,?)').run(m.id, req.user.id, opt); }

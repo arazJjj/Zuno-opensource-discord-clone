@@ -49,6 +49,7 @@ async function start() {
   else if (saved?.dm && S.dms.find((d) => d.id === saved.dm)) openDm(saved.dm);
   else { const off = S.servers.find((s) => s.is_official); off ? openChannel(off.id, off.channels[0]?.id) : openHome(); }
   renderRail(); renderMe();
+  if (!S.me.daily_claimed) api('/shards/daily', { body: {} }).then((r) => { if (r.claimed) { Object.assign(S.me, { shards: r.shards, streak: r.streak, shard_level: r.shard_level }); toast(`Daily streak ${r.streak}: +${r.gain} Shards`); if (S.view.type === 'home') renderSidebar(); } }).catch(() => {});
   if (sessionStorage.zunoInvite) { const c = sessionStorage.zunoInvite; delete sessionStorage.zunoInvite; tryRun(async () => joined(await api('/invite/' + c, { body: {} }))); }
 }
 const cacheUser = (u) => { if (u) S.users[u.id] = { ...(S.users[u.id] || {}), ...u }; };
@@ -68,23 +69,27 @@ function connect() {
     else {
       if (m.dm_id) { const d = S.dms.find((x) => x.id === m.dm_id); if (d) d.last_at = m.created_at; }
       if (m.author_id !== S.me.id && (m.dm_id || mentionsMe(m.content))) notify(m);
+      if (m.channel_id && m.author_id !== S.me.id && mentionsMe(m.content)) S.mentions[m.channel_id] = (S.mentions[m.channel_id] || 0) + 1;
     }
     if (m.dm_id) { S.dms.sort((a, b) => (b.last_at || 0) - (a.last_at || 0)); }
     S.lastMsg = S.lastMsg || {}; S.lastMsg[m.channel_id || m.dm_id] = m.created_at;
     renderRail(); renderSidebar();
   });
-  socket.on('message:update', (m) => { const i = S.messages.findIndex((x) => x.id === m.id); if (i > -1) { S.messages[i] = m; const el = document.querySelector(`[data-mid="${m.id}"]`); if (el) el.replaceWith(msgEl(m, el.classList.contains('first'))); } });
+  socket.on('message:update', (m) => { const i = S.messages.findIndex((x) => x.id === m.id); if (i > -1) { S.messages[i] = m; if (curChannel()?.type === 'forum' && window.ZF) { ZF.render(); return; } const el = document.querySelector(`[data-mid="${m.id}"]`); if (el) el.replaceWith(msgEl(m, el.classList.contains('first'))); } });
   socket.on('message:delete', ({ id }) => { S.messages = S.messages.filter((m) => m.id !== id); document.querySelector(`[data-mid="${id}"]`)?.remove(); });
   socket.on('typing', (t) => { if ((t.channel_id && t.channel_id === S.view.channel) || (t.dm_id && t.dm_id === S.view.dm)) { S.typing[t.user_id] = { name: t.name, at: Date.now() }; renderTyping(); } });
   socket.on('presence', ({ user_id, online }) => { if (S.users[user_id]) S.users[user_id].online = online; for (const k in S.members) S.members[k].forEach((m) => { if (m.id === user_id) m.online = online; }); renderMembers(); if (S.view.type === 'home') renderSidebar(); });
   socket.on('user:update', (u) => { cacheUser(u); if (u.id === S.me.id) { Object.assign(S.me, u); renderMe(); } for (const k in S.members) S.members[k] = S.members[k].map((m) => (m.id === u.id ? { ...m, ...u } : m)); renderMembers(); });
-  socket.on('server:update', (s) => { const i = S.servers.findIndex((x) => x.id === s.id); const role = S.servers[i]?.my_role; if (i > -1) S.servers[i] = { ...s, my_role: role }; renderRail(); renderSidebar(); renderHead(); });
+  socket.on('server:update', (s) => { setTimeout(() => { if (S.view.lobby && S.view.server === s.id && window.ZL) ZL.render(S.servers.find((x) => x.id === s.id) || s); }, 0); const i = S.servers.findIndex((x) => x.id === s.id); const role = S.servers[i]?.my_role; if (i > -1) S.servers[i] = { ...s, my_role: role }; renderRail(); renderSidebar(); renderHead(); });
   socket.on('server:delete', ({ id }) => { S.servers = S.servers.filter((s) => s.id !== id); if (S.view.server === id) openHome(); renderRail(); });
   socket.on('member:join', ({ server_id, user }) => { cacheUser(user); if (S.members[server_id] && !S.members[server_id].find((m) => m.id === user.id)) S.members[server_id].push({ ...user, role: 'member' }); renderMembers(); });
   socket.on('member:leave', ({ server_id, user_id }) => { if (S.members[server_id]) S.members[server_id] = S.members[server_id].filter((m) => m.id !== user_id); renderMembers(); });
   socket.on('dm:update', (d) => { if (!d) return; d.members.forEach(cacheUser); const i = S.dms.findIndex((x) => x.id === d.id); if (i > -1) S.dms[i] = d; else S.dms.unshift(d); renderSidebar(); renderRail(); if (S.view.dm === d.id) { renderHead(); renderMembers(); } });
   socket.on('friends:update', (f) => { S.friends = f; f.forEach((x) => cacheUser(x.user)); renderRail(); if (S.view.type === 'home') { renderSidebar(); if (!S.view.dm) renderFriends(); } });
   window.ZV?.bind(socket); window.ZT?.bind(socket);
+  socket.on('server:added', (s) => { if (!S.servers.find((x) => x.id === s.id)) S.servers.push(s); renderRail(); toast('You were accepted into ' + s.name + '!'); Z.sound?.('join'); });
+  socket.on('joinreq:new', ({ server_id, user }) => { const s = S.servers.find((x) => x.id === server_id); toast(`${user.display_name} asked to join ${s?.name || 'your server'}. Open server menu > Join requests.`); });
+  socket.on('joinreq:rejected', ({ server_id }) => toast('Your request to join a server was not accepted.'));
   socket.on('emojis:changed', async () => { S.emojis = await api('/emojis').catch(() => S.emojis); });
   socket.on('events:changed', ({ server_id }) => { if (S.view.server === server_id) window.ZE?.refresh(); });
   socket.on('levelup', ({ level, server }) => { toast(`Level up! You reached level ${level} in ${server || 'this hub'}`); Z.sound?.('mention'); });
@@ -136,12 +141,20 @@ function renderRail() {
   const dmUnread = S.dms.filter((d) => isUnread(d.id, d.last_at)).length + S.friends.filter((f) => f.status === 'incoming').length;
   $('#home-btn').classList.toggle('active', S.view.type === 'home');
   $('#home-btn').innerHTML = `<img src="/logo.svg" alt="Home">${dmUnread ? `<span class="badge">${dmUnread}</span>` : ''}`;
-  $('#server-list').innerHTML = S.servers.map((s) => `<button class="rail-btn ${S.view.server === s.id ? 'active' : ''}" data-server="${s.id}" title="${esc(s.name)}">${serverIcon(s)}</button>`).join('');
+  $('#home-btn').parentElement.classList.toggle('active', S.view.type === 'home');
+  $('#server-list').innerHTML = S.servers.map((s) => { const men = serverMentions(s); const un = s.channels.some((c) => c.id !== S.view.channel && isUnread(c.id, S.lastMsg?.[c.id]));
+    return `<div class="rail-item ${S.view.server === s.id ? 'active' : ''} ${un ? 'unread' : ''}"><span class="pill"></span><button class="rail-btn ${S.view.server === s.id ? 'active' : ''}" data-server="${s.id}" title="${esc(s.name)}">${serverIcon(s)}</button>${men ? `<span class="badge rail-badge">${men}</span>` : ''}</div>`; }).join('');
 }
 $('#server-list').addEventListener('click', (e) => { const b = e.target.closest('[data-server]'); if (!b) return; const s = S.servers.find((x) => x.id === b.dataset.server);
+  if (S.view.server !== s.id && lobbyOf(s).enabled && window.ZL) return ZL.open(s.id);
   const last = JSON.parse(localStorage['zunoLast_' + s.id] || 'null'); openChannel(s.id, s.channels.find((c) => c.id === last)?.id || s.channels[0]?.id); });
 $('#server-list').addEventListener('contextmenu', (e) => { const b = e.target.closest('[data-server]'); if (!b) return; e.preventDefault(); serverMenu(S.servers.find((x) => x.id === b.dataset.server), e.clientX, e.clientY); });
 $('#home-btn').onclick = () => openHome();
+S.mentions = {};
+const serverMentions = (s) => s.channels.reduce((n, c) => n + (S.mentions[c.id] || 0), 0);
+const lobbyOf = (s) => { let L = null; try { L = s?.lobby ? JSON.parse(s.lobby) : null; } catch {} return { enabled: true, banner_color: '#5865f2', accent: '#5865f2', tagline: '', buttons: [], featured: [], rules: '', ...(L || {}) }; };
+const collapsed = () => JSON.parse(localStorage.zunoCollapsed || '{}');
+function toggleCat(key) { const c = collapsed(); c[key] = !c[key]; localStorage.zunoCollapsed = JSON.stringify(c); renderSidebar(); }
 $('#add-server-btn').onclick = () => addServerModal();
 $('#discover-btn').onclick = () => discoverModal();
 
@@ -155,7 +168,8 @@ function openHome(tab) {
 async function openChannel(sid, cid) {
   if (!cid) return;
   S.view = { type: 'server', server: sid, channel: cid, dm: null }; saveView(); localStorage['zunoLast_' + sid] = JSON.stringify(cid);
-  closeNav(); renderRail(); renderSidebar(); renderHead(); $('#composer').classList.remove('hidden'); S.typing = {}; renderTyping(); setPlaceholder();
+  delete S.mentions[cid];
+  closeNav(); renderRail(); renderSidebar(); renderHead(); $('#composer').classList.toggle('hidden', curChannel()?.type === 'forum'); S.typing = {}; renderTyping(); setPlaceholder();
   await loadMessages(); if (!S.members[sid]) S.members[sid] = await api('/servers/' + sid + '/members').catch(() => []); S.members[sid].forEach(cacheUser); renderMembers();
 }
 async function openDm(did) {
@@ -189,15 +203,25 @@ function renderSidebar() {
   } else {
     const s = curServer(); if (!s) return;
     const admin = ['owner', 'admin'].includes(s.my_role);
-    head.innerHTML = `<span>${esc(s.name)}</span><span>⌄</span>`; head.onclick = (e) => serverMenu(s, e.clientX, 52);
+    head.innerHTML = `<span class="sh-name">${esc(s.name)}</span>${ZI('chevronDown')}`; head.onclick = (e) => serverMenu(s, e.clientX, 52);
+    const col = collapsed(); const icon = (c) => ZI(c.type === 'announcement' ? 'megaphone' : c.type === 'forum' ? 'message' : 'hash');
+    const cat = (key, title, addId, addTitle) => `<div class="side-cat ${col[s.id + key] ? 'closed' : ''}" data-cat="${s.id + key}"><span class="cat-t">${ZI('chevronDown')}${title}</span>${admin && addId ? `<button id="${addId}" title="${addTitle}">${ZI('plus')}</button>` : ''}</div>`;
+    const chRow = (c) => { const act = c.id === S.view.channel; const un = !act && isUnread(c.id, S.lastMsg?.[c.id]); const men = S.mentions[c.id] || 0;
+      if (col[s.id + (c.type === 'forum' ? 'forum' : 'text')] && !act && !un && !men) return '';
+      return `<div class="side-item ch ${act ? 'active' : ''} ${un ? 'unread' : ''}" data-ch="${c.id}" ${admin ? 'draggable="true"' : ''}>
+        <span class="hash">${icon(c)}</span><span class="ch-name">${esc(c.name)}</span>${men ? `<span class="badge">${men}</span>` : ''}${admin ? `<button class="x" data-edit-ch="${c.id}" title="Edit channel">${ZI('settings')}</button>` : ''}</div>`; };
+    const lobby = lobbyOf(s); const texts = s.channels.filter((c) => !['voice', 'forum'].includes(c.type)); const forums = s.channels.filter((c) => c.type === 'forum'); const voices = s.channels.filter((c) => c.type === 'voice');
     body.innerHTML = (s.banner ? `<div class="server-banner" style="background-image:url('${esc(s.banner)}')"></div>` : '') +
-      `<div class="side-item" id="events-btn"><span class="hash">📅</span><span>Events</span></div>` +
-      `<div class="side-cat"><span>Text channels</span>${admin ? '<button id="add-ch" title="Create channel">+</button>' : ''}</div>` +
-      s.channels.filter((c) => c.type !== 'voice').map((c) => `<div class="side-item ${c.id === S.view.channel ? 'active' : ''} ${c.id !== S.view.channel && isUnread(c.id, S.lastMsg?.[c.id]) ? 'unread' : ''}" data-ch="${c.id}" ${admin ? 'draggable="true"' : ''}>
-        <span class="hash">${c.type === 'announcement' ? '📢' : '#'}</span><span>${esc(c.name)}</span>${admin ? `<button class="x" data-edit-ch="${c.id}" title="Edit">⚙</button>` : ''}</div>`).join('') +
-      `<div class="side-cat"><span>Voice channels</span>${admin ? '<button id="add-vc" title="Create voice channel">+</button>' : ''}</div>` +
-      s.channels.filter((c) => c.type === 'voice').map((c) => `<div class="side-item voice-ch ${window.ZV?.room === 'ch:' + c.id ? 'active' : ''}" data-vc="${c.id}" ${admin ? 'draggable="true"' : ''}>
-        <span class="hash">🔊</span><span>${esc(c.name)}</span>${window.ZV?.activityOf('ch:' + c.id) ? '<span class="tag" style="background:var(--green)">LIVE</span>' : ''}${admin ? `<button class="x" data-edit-ch="${c.id}" title="Edit">⚙</button>` : ''}</div>${window.ZV ? ZV.listHtml('ch:' + c.id) : ''}`).join('');
+      (lobby.enabled ? `<div class="side-item ${S.view.lobby ? 'active' : ''}" id="lobby-btn"><span class="hash">${ZI('door')}</span><span>Lobby</span></div>` : '') +
+      `<div class="side-item" id="events-btn"><span class="hash">${ZI('calendar')}</span><span>Events</span></div>` +
+      `<div class="side-sep"></div>` +
+      cat('text', 'Text channels', 'add-ch', 'Create channel') + texts.map(chRow).join('') +
+      (forums.length ? cat('forum', 'Forums', null) + forums.map(chRow).join('') : '') +
+      cat('voice', 'Voice channels', 'add-vc', 'Create voice channel') +
+      (col[s.id + 'voice'] ? '' : voices.map((c) => `<div class="side-item ch voice-ch ${window.ZV?.room === 'ch:' + c.id ? 'active' : ''}" data-vc="${c.id}" ${admin ? 'draggable="true"' : ''}>
+        <span class="hash">${ZI('volume')}</span><span class="ch-name">${esc(c.name)}</span>${window.ZV?.activityOf('ch:' + c.id) ? '<span class="tag" style="background:var(--green)">LIVE</span>' : ''}${admin ? `<button class="x" data-edit-ch="${c.id}" title="Edit channel">${ZI('settings')}</button>` : ''}</div>${window.ZV ? ZV.listHtml('ch:' + c.id) : ''}`).join(''));
+    body.querySelectorAll('[data-cat]').forEach((el) => (el.onclick = (e) => { if (e.target.closest('button')) return; toggleCat(el.dataset.cat); }));
+    $('#lobby-btn') && ($('#lobby-btn').onclick = () => window.ZL?.open(s.id));
     body.querySelectorAll('[data-ch]').forEach((el) => (el.onclick = (e) => { if (e.target.closest('[data-edit-ch]')) return editChannelModal(s, s.channels.find((c) => c.id === el.dataset.ch)); openChannel(s.id, el.dataset.ch); }));
     body.querySelectorAll('[data-vc]').forEach((el) => (el.onclick = (e) => { if (e.target.closest('[data-edit-ch]')) return editChannelModal(s, s.channels.find((c) => c.id === el.dataset.vc)); window.ZV?.join('ch:' + el.dataset.vc, s.channels.find((c) => c.id === el.dataset.vc).name); }));
     $('#events-btn').onclick = () => window.ZE?.open(s);
@@ -214,45 +238,52 @@ function renderSidebar() {
 function renderDmList(filter) {
   const pend = S.friends.filter((f) => f.status === 'incoming').length;
   $('#side-body').innerHTML = `
-    <div class="side-item ${!S.view.dm && S.view.homeTab !== 'shop' ? 'active' : ''}" data-home="friends"><span class="hash">👥</span><span>Friends</span>${pend ? `<span class="badge">${pend}</span>` : ''}</div>
-    <div class="side-item" data-home="shop"><span class="hash">🛍️</span><span>Shop</span><span class="badge" style="background:var(--green)">FREE</span></div>
-    <div class="side-item" data-home="bots"><span class="hash">🤖</span><span>My Bots</span></div>
-    <div class="side-cat"><span>Direct messages</span><button id="new-dm" title="New DM / group">+</button></div>
+    <div class="side-item ${!S.view.dm && S.view.homeTab !== 'shop' ? 'active' : ''}" data-home="friends"><span class="hash">${ZI('users')}</span><span>Friends</span>${pend ? `<span class="badge">${pend}</span>` : ''}</div>
+    <div class="side-item" data-home="shop"><span class="hash">${ZI('bag')}</span><span>Shop</span><span class="badge" style="background:var(--green)">FREE</span></div>
+    <div class="side-item" data-home="bots"><span class="hash">${ZI('bot')}</span><span>My Bots</span></div>
+    <div class="side-item" data-home="shards"><span class="hash">${ZI('sparkles')}</span><span>Shards</span><span class="badge" style="background:var(--brand)">${S.me.shards || 0}</span></div>
+    <div class="side-cat"><span>Direct messages</span><button id="new-dm" title="New DM / group">${ZI('plus')}</button></div>
     ${S.dms.filter((d) => dmName(d).toLowerCase().includes(filter)).map((d) => { const o = dmOther(d);
       return `<div class="side-item ${d.id === S.view.dm ? 'active' : ''} ${d.id !== S.view.dm && isUnread(d.id, d.last_at) ? 'unread' : ''}${d.is_group ? '' : plateClass(o)}" data-dm="${d.id}">
         ${d.is_group ? `<span class="av" style="width:32px;height:32px;font-size:13px;background:#f59e0b">${d.icon ? `<img src="${esc(d.icon)}">` : '👥'}</span>` : avatar(o, 32, true)}
         <span style="min-width:0"><div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(dmName(d))}</div>
         <div class="small muted">${d.is_group ? d.members.length + ' members' : esc(o.custom_status || '')}</div></span></div>`; }).join('')}`;
-  document.querySelectorAll('[data-home]').forEach((el) => (el.onclick = () => { const t = el.dataset.home; if (t === 'shop') return shopModal(); if (t === 'bots') return botsModal(); openHome('friends'); }));
+  document.querySelectorAll('[data-home]').forEach((el) => (el.onclick = () => { const t = el.dataset.home; if (t === 'shop') return shopModal(); if (t === 'shards') return window.ZS?.open(); if (t === 'bots') return botsModal(); openHome('friends'); }));
   document.querySelectorAll('[data-dm]').forEach((el) => (el.onclick = () => openDm(el.dataset.dm)));
   $('#new-dm').onclick = () => newDmModal();
 }
 function renderMe() {
   const u = S.me;
-  $('#me-bar').innerHTML = `<div class="who" id="me-who" style="display:flex;gap:8px;align-items:center">${avatar(u, 32, true)}<div style="min-width:0"><b>${esc(u.display_name)}</b><span>${esc(u.custom_status || '@' + u.username)}</span></div></div>
-    <button id="shop-btn" title="Shop">🛍️</button><button id="settings-btn" title="Settings">⚙️</button>`;
+  const inCall = !!window.ZV?.room; const muted = inCall ? ZV.muted || ZV.deaf : S.selfMute; const deaf = inCall ? ZV.deaf : S.selfDeaf;
+  $('#me-bar').innerHTML = `<div class="who" id="me-who">${avatar({ ...u, _preview: true, online: true }, 32, true)}<div style="min-width:0"><b>${esc(u.display_name)}</b><span>${esc(u.custom_status || 'Online')}</span></div></div>
+    <button id="mute-btn" class="${muted ? 'off' : ''}" title="${muted ? 'Unmute' : 'Mute'}">${ZI(muted ? 'micOff' : 'mic')}</button><button id="deaf-btn" class="${deaf ? 'off' : ''}" title="${deaf ? 'Undeafen' : 'Deafen'}">${ZI(deaf ? 'headphoneOff' : 'headphones')}</button><button id="settings-btn" title="User settings">${ZI('settings')}</button>`;
   $('#me-who').onclick = (e) => profilePopover(u.id, e.clientX, e.clientY - 360);
-  $('#settings-btn').onclick = () => settingsModal(); $('#shop-btn').onclick = () => shopModal();
+  $('#settings-btn').onclick = () => settingsModal();
+  $('#mute-btn').onclick = () => { if (window.ZV?.room) ZV.toggleMute(); else { S.selfMute = !S.selfMute; Z.sound?.(S.selfMute ? 'mute' : 'unmute'); renderMe(); } };
+  $('#deaf-btn').onclick = () => { if (window.ZV?.room) ZV.toggleDeaf(); else { S.selfDeaf = !S.selfDeaf; S.selfMute = S.selfDeaf || S.selfMute; Z.sound?.(S.selfDeaf ? 'deafen' : 'undeafen'); renderMe(); } };
 }
 
 // ---------- head ----------
 function renderHead() {
-  const h = $('#chat-head'); const menu = '<button class="menu-btn" id="menu-btn">☰</button>';
-  if (S.view.type === 'home' && !S.view.dm) {
-    const tabs = ['online', 'all', 'pending', 'blocked'];
-    h.innerHTML = `${menu}<span class="title">👥 Friends</span><div class="tabs" style="margin:0 0 0 12px">${tabs.map((t) => `<button data-ftab="${t}" class="${(S.fTab || 'online') === t ? 'on' : ''}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}<button class="btn green sm" data-ftab="add">Add Friend</button></div>`;
+  const h = $('#chat-head'); const menu = `<button class="menu-btn" id="menu-btn" title="Menu">${ZI('menu')}</button>`;
+  if (S.view.lobby) { const s = curServer(); h.innerHTML = `${menu}<span class="ch-icon">${ZI('door')}</span><span class="title">${esc(s?.name || '')} Lobby</span><span class="topic">${esc(lobbyOf(s).tagline || s?.description || '')}</span><div class="tools"><button id="invite-btn" title="Invite">${ZI('mailPlus')}</button><button id="mem-toggle" title="Member list">${ZI('users')}</button></div>`;
+    $('#invite-btn').onclick = () => inviteModal(s); }
+  else if (S.view.type === 'home' && !S.view.dm) {
+    const tabs = ['online', 'all', 'pending', 'suggested', 'blocked'];
+    h.innerHTML = `${menu}<span class="ch-icon">${ZI('users')}</span><span class="title">Friends</span><div class="tabs" style="margin:0 0 0 12px">${tabs.map((t) => `<button data-ftab="${t}" class="${(S.fTab || 'online') === t ? 'on' : ''}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}<button class="btn green sm" data-ftab="add">Add Friend</button></div>`;
     h.querySelectorAll('[data-ftab]').forEach((b) => (b.onclick = () => { S.fTab = b.dataset.ftab; renderHead(); renderFriends(); }));
   } else if (S.view.dm) {
     const d = S.dms.find((x) => x.id === S.view.dm); if (!d) return;
     h.innerHTML = `${menu}${d.is_group ? '👥' : avatar(dmOther(d), 24, true)}<span class="title">${esc(dmName(d))}</span>
-      <div class="tools"><button id="call-btn" title="Voice call">📞</button><button id="vcall-btn" title="Video call">🎥</button>${d.is_group ? '<button id="grp-edit" title="Group settings">✏️</button><button id="grp-add" title="Add people">➕</button>' : ''}<button id="pins-btn" title="Pinned">📌</button><button id="search-btn" title="Search">🔍</button><button id="mem-toggle" title="Members">👥</button></div>`;
+      <div class="tools"><button id="call-btn" title="Start voice call">${ZI('phone')}</button><button id="vcall-btn" title="Start video call">${ZI('video')}</button>${d.is_group ? `<button id="grp-edit" title="Group settings">${ZI('pencil')}</button><button id="grp-add" title="Add people">${ZI('plus')}</button>` : ''}<button id="pins-btn" title="Pinned messages">${ZI('pin')}</button><button id="mem-toggle" title="Member list">${ZI('users')}</button><button id="search-btn" class="search-pill" title="Search">Search ${ZI('search')}</button></div>`;
     $('#call-btn').onclick = () => window.ZV?.join('dm:' + d.id, dmName(d));
     $('#vcall-btn').onclick = () => window.ZV?.join('dm:' + d.id, dmName(d), { video: true });
     $('#grp-edit') && ($('#grp-edit').onclick = () => groupEditModal(d)); $('#grp-add') && ($('#grp-add').onclick = () => newDmModal(d));
   } else {
     const c = curChannel(); if (!c) return;
-    h.innerHTML = `${menu}<span class="title">${c.type === 'announcement' ? '📢' : '#'} ${esc(c.name)}</span><span class="topic">${esc(c.topic || '')}</span>
-      <div class="tools"><button id="invite-btn" title="Invite">📨</button><button id="pins-btn" title="Pinned">📌</button><button id="search-btn" title="Search">🔍</button><button id="mem-toggle" title="Members">👥</button></div>`;
+    h.innerHTML = `${menu}<span class="ch-icon">${ZI(c.type === 'announcement' ? 'megaphone' : c.type === 'forum' ? 'message' : 'hash')}</span><span class="title">${esc(c.name)}</span>${c.topic ? `<span class="topic">${esc(c.topic)}</span>` : '<span class="topic"></span>'}
+      <div class="tools"><button id="thr-btn" title="Threads">${ZI('thread')}</button><button id="invite-btn" title="Invite">${ZI('mailPlus')}</button><button id="pins-btn" title="Pinned messages">${ZI('pin')}</button><button id="mem-toggle" title="Member list">${ZI('users')}</button><button id="search-btn" class="search-pill" title="Search">Search ${ZI('search')}</button></div>`;
+    $('#thr-btn').onclick = () => toast('Hover a message and press the thread icon to start a thread.');
     $('#invite-btn').onclick = () => inviteModal(curServer());
   }
   $('#menu-btn').onclick = () => document.body.classList.toggle('nav-open');
@@ -265,6 +296,7 @@ document.addEventListener('click', (e) => { if (document.body.classList.contains
 function renderFriends() {
   $('#composer').classList.add('hidden');
   const tab = S.fTab || 'online'; const box = $('#messages');
+  if (tab === 'suggested' && window.ZSug) return ZSug.render(box);
   if (tab === 'add') {
     box.innerHTML = `<div class="welcome"><h2>Add Friend</h2><p class="muted">Add friends with their Zuno username.</p>
       <form id="add-friend" style="display:flex;gap:8px;max-width:560px"><input name="username" placeholder="Enter a username" required><button class="btn primary">Send Request</button></form></div>`;
@@ -284,6 +316,7 @@ async function startDm(uid) { const d = await api('/dms', { body: { user_ids: [u
 
 // ---------- messages ----------
 function renderMessages() {
+  if (curChannel()?.type === 'forum' && window.ZF) return ZF.render();
   const box = $('#messages'); const ch = curChannel(); const d = S.dms.find((x) => x.id === S.view.dm);
   let head = '';
   if (ch) head = `<div class="welcome"><div class="av" style="width:68px;height:68px;font-size:34px;background:var(--bg3)">#</div><h2>Welcome to #${esc(ch.name)}!</h2><p class="muted">This is the start of the #${esc(ch.name)} channel.</p></div>`;
@@ -306,7 +339,7 @@ function groupedEl(m, prev) {
   const first = !prev || prev.author_id !== m.author_id || m.created_at - prev.created_at > 7 * 60e3 || m.reply_to;
   frag.appendChild(msgEl(m, first)); return frag;
 }
-function appendMessage(m) { const box = $('#messages'); const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 120 || m.author_id === S.me.id;
+function appendMessage(m) { if (curChannel()?.type === 'forum' && window.ZF) return ZF.render(); const box = $('#messages'); const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 120 || m.author_id === S.me.id;
   box.appendChild(groupedEl(m, S.messages[S.messages.length - 2])); if (stick) { box.scrollTop = box.scrollHeight; box.querySelectorAll('img').forEach((i) => i.addEventListener('load', () => (box.scrollTop = box.scrollHeight), { once: true })); } }
 function msgEl(m, first) {
   const el = document.createElement('div'); const a = S.users[m.author_id] || m.author || {};
@@ -324,7 +357,7 @@ function msgEl(m, first) {
       `<a class="file" href="${esc(x.url)}" target="_blank" download>📄 <span>${esc(x.name)}</span></a>`).join('')}</div>` : ''}
     ${m.reactions.length ? `<div class="reacts">${m.reactions.map((r) => `<button class="react ${r.users.includes(S.me.id) ? 'mine' : ''}" data-react="${esc(r.emoji)}" title="${esc(r.users.map((u) => S.users[u]?.display_name || 'someone').join(', '))}">${esc(r.emoji)} ${r.users.length}</button>`).join('')}</div>` : ''}
     ${m.thread_count ? `<button class="thread-link" data-t="thread">🧵 ${m.thread_count} ${m.thread_count === 1 ? 'reply' : 'replies'} ›</button>` : ''}</div>
-    <div class="msg-tools"><button data-t="react" title="Add reaction">😀</button><button data-t="reply" title="Reply">↩️</button>${m.thread_id ? '' : '<button data-t="thread" title="Thread">🧵</button>'}${m.author_id === S.me.id ? '<button data-t="edit" title="Edit">✏️</button>' : ''}<button data-t="more" title="More">⋯</button></div>`;
+    <div class="msg-tools"><button data-t="react" title="Add reaction">${ZI('smilePlus')}</button><button data-t="reply" title="Reply">${ZI('reply')}</button>${m.thread_id ? '' : `<button data-t="thread" title="Create thread">${ZI('thread')}</button>`}${m.author_id === S.me.id ? `<button data-t="edit" title="Edit">${ZI('pencil')}</button>` : ''}<button data-t="more" title="More">${ZI('moreH')}</button></div>`;
   return el;
 }
 $('#messages').addEventListener('click', (e) => {
@@ -346,6 +379,11 @@ $('#messages').addEventListener('click', (e) => { const v = e.target.closest('[d
   tryRun(() => api(`/messages/${mEl.dataset.mid}/vote`, { body: { option: +v.dataset.vote } })); }, true);
 function pollHtml(m) {
   const p = m.poll; const tot = p.total || 0;
+  if (p.quiz) { const myVote = p.votes.findIndex((v) => v.includes(S.me.id)); const done = myVote > -1;
+    return `<div class="poll quiz"><div class="poll-q"><span class="tag">QUIZ</span> ${esc(p.question)}</div>${p.options.map((o, i) => { const n = p.votes[i].length; const pct = tot ? Math.round(n * 100 / tot) : 0;
+      const cls = done ? (i === p.answer ? 'right' : i === myVote ? 'wrong' : '') : '';
+      return `<button class="poll-opt ${cls}" data-vote="${i}" ${done ? 'disabled' : ''}>${done ? `<span class="bar" style="width:${pct}%"></span>` : ''}<span class="lbl">${esc(o)}</span>${done ? `<span class="pct">${i === p.answer ? 'Correct · ' : ''}${pct}%</span>` : ''}</button>`; }).join('')}
+      <div class="small muted">${done ? (myVote === p.answer ? 'You got it right!' : 'Not quite. The right answer is highlighted.') : 'Pick one answer. You only get one try.'} · ${tot} ${tot === 1 ? 'answer' : 'answers'}</div></div>`; }
   return `<div class="poll"><div class="poll-q">📊 ${esc(p.question)}</div>${p.options.map((o, i) => { const n = p.votes[i].length; const pct = tot ? Math.round(n * 100 / tot) : 0; const mine = p.votes[i].includes(S.me.id);
     return `<button class="poll-opt ${mine ? 'mine' : ''}" data-vote="${i}"><span class="bar" style="width:${pct}%"></span><span class="lbl">${mine ? '✅ ' : ''}${esc(o)}</span><span class="pct">${n} · ${pct}%</span></button>`; }).join('')}
     <div class="small muted">${tot} ${tot === 1 ? 'vote' : 'votes'}${p.multi ? ' · pick as many as you like' : ''}</div></div>`;
@@ -370,9 +408,9 @@ function editMessage(m) {
   box.querySelector('[data-ed="cancel"]').onclick = (e) => { e.preventDefault(); done(); };
   box.querySelector('[data-ed="save"]').onclick = (e) => { e.preventDefault(); save(); };
 }
-function setReply(m) { S.replyTo = m; const b = $('#reply-bar'); b.classList.remove('hidden'); b.innerHTML = `<span>Replying to <b>${esc(m.author.display_name)}</b></span><button id="cancel-reply">✕</button>`; $('#cancel-reply').onclick = clearReply; $('#input').focus(); }
+function setReply(m) { S.replyTo = m; const b = $('#reply-bar'); b.classList.remove('hidden'); b.innerHTML = `<span>Replying to <b>${esc(m.author.display_name)}</b> <span class="muted">${esc((m.content || 'Attachment').slice(0, 60))}</span></span><button id="cancel-reply" title="Cancel reply">${ZI('x')}</button>`; $('#cancel-reply').onclick = clearReply; $('#input').focus(); }
 function clearReply() { S.replyTo = null; $('#reply-bar').classList.add('hidden'); }
-function renderTyping() { const names = Object.values(S.typing).map((t) => t.name); $('#typing').innerHTML = names.length ? `<b>${esc(names.slice(0, 3).join(', '))}</b> ${names.length > 1 ? 'are' : 'is'} typing…` : ''; }
+function renderTyping() { const names = Object.values(S.typing).map((t) => t.name); $('#typing').innerHTML = names.length ? `<span class="tdots"><i></i><i></i><i></i></span><b>${esc(names.length > 3 ? 'Several people' : names.slice(0, 3).join(', '))}</b> ${names.length > 1 ? 'are' : 'is'} typing...` : ''; }
 
 // ---------- composer ----------
 const input = $('#input');
@@ -389,11 +427,15 @@ $('#send-btn').onclick = () => send();
 $('#plus-btn').onclick = (e) => { e.stopPropagation(); menu(e.clientX, e.clientY - 200, [['📎 Upload a file', () => $('#file-input').click()], ['📊 Create a poll', () => pollModal()], ['🎟️ Send a sticker', () => stickerPicker(e.clientX, e.clientY)], ['⏰ Schedule a message', () => scheduleModal()]]); };
 function pollModal() {
   const m = modal(`<h2>📊 Create a poll</h2><form id="pl"><label>Question<input name="q" required maxlength="300" placeholder="What should we play tonight?"></label><div id="pl-opts"></div>
-    <button type="button" class="btn sm" id="pl-add">+ Add answer</button><label style="flex-direction:row;align-items:center;gap:8px;display:flex;margin-top:10px"><input type="checkbox" name="multi" style="width:auto"> Allow multiple answers</label><div class="row"><button class="btn primary">Post poll</button></div></form>`);
+    <button type="button" class="btn sm" id="pl-add">+ Add answer</button><label style="flex-direction:row;align-items:center;gap:8px;display:flex;margin-top:10px"><input type="checkbox" name="multi" style="width:auto"> Allow multiple answers</label>
+    <label style="flex-direction:row;align-items:center;gap:8px;display:flex;text-transform:none"><input type="checkbox" name="quiz" id="pl-quiz" style="width:auto"> Quiz mode (one right answer)</label><div id="pl-ans" class="hidden"><label>Correct answer<select name="answer"></select></label></div><div class="row"><button class="btn primary">Post poll</button></div></form>`);
   const add = () => { if ($('#pl-opts', m).children.length >= 10) return; const i = document.createElement('input'); i.placeholder = 'Answer ' + ($('#pl-opts', m).children.length + 1); i.maxLength = 100; i.style.marginTop = '6px'; $('#pl-opts', m).appendChild(i); };
   add(); add(); $('#pl-add', m).onclick = add;
-  $('#pl', m).onsubmit = (e) => { e.preventDefault(); const options = [...$('#pl-opts', m).querySelectorAll('input')].map((i) => i.value.trim()).filter(Boolean);
-    tryRun(async () => { await api('/messages', { body: { poll: { question: e.target.q.value, options, multi: e.target.multi.checked }, channel_id: S.view.channel, dm_id: S.view.dm } }); closeModal(); }); };
+  const syncAns = () => { const sel = m.querySelector('[name=answer]'); const opts = [...$('#pl-opts', m).querySelectorAll('input')]; sel.innerHTML = opts.map((i, n) => `<option value="${n}">${esc(i.value || 'Answer ' + (n + 1))}</option>`).join(''); };
+  $('#pl-quiz', m).onchange = (e) => { $('#pl-ans', m).classList.toggle('hidden', !e.target.checked); syncAns(); }; $('#pl-opts', m).addEventListener('input', syncAns); $('#pl-add', m).addEventListener('click', syncAns);
+  $('#pl', m).onsubmit = (e) => { e.preventDefault(); const all = [...$('#pl-opts', m).querySelectorAll('input')].map((i) => i.value.trim()); const options = all.filter(Boolean); const quiz = e.target.quiz.checked;
+    const answer = quiz ? options.indexOf(all[+e.target.answer.value]) : undefined; if (quiz && answer < 0) return toast('Pick a correct answer that is not empty');
+    tryRun(async () => { await api('/messages', { body: { poll: { question: e.target.q.value, options, multi: !quiz && e.target.multi.checked, quiz, answer }, channel_id: S.view.channel, dm_id: S.view.dm } }); closeModal(); }); };
 }
 function stickerPicker(x, y, cb) {
   const st = (S.emojis || []).filter((e) => e.kind === 'sticker');
@@ -453,11 +495,11 @@ function emojiPicker(x, y, cb) {
 $('#emoji-btn').onclick = (e) => { e.stopPropagation(); emojiPicker(e.clientX, e.clientY, (em) => { input.value += em; input.focus(); }); };
 $('#gif-btn').onclick = (e) => { e.stopPropagation(); gifPicker(e.clientX, e.clientY); };
 async function gifPicker(x, y) {
-  showPop(`<div class="gif-panel"><input id="gif-q" placeholder="Search GIFs"><div class="tabs" style="margin:6px 0"><button id="gif-paste" class="btn sm">Paste a GIF link</button><label class="btn sm">Upload GIF<input type="file" accept="image/gif,image/*" hidden id="gif-up"></label></div><div class="gif-grid" id="gif-grid"><p class="muted">Loading…</p></div></div>`, Math.max(8, x - 420), Math.max(8, y - 520), 'gif');
+  showPop(`<div class="gif-panel"><input id="gif-q" placeholder="Search KLIPY"><div class="tabs" style="margin:6px 0"><button id="gif-paste" class="btn sm">Paste a GIF link</button><label class="btn sm">Upload GIF<input type="file" accept="image/gif,image/*" hidden id="gif-up"></label></div><div class="gif-grid" id="gif-grid"><p class="muted">Loading…</p></div></div>`, Math.max(8, x - 420), Math.max(8, y - 520), 'gif');
   const load = async (q) => {
     const list = await api('/gifs?q=' + encodeURIComponent(q || '')).catch(() => []);
     $('#gif-grid').innerHTML = list.length ? list.map((g) => `<img src="${esc(g.preview || g.url)}" data-full="${esc(g.url)}" title="${esc(g.title || '')}" loading="lazy">`).join('')
-      : `<p class="muted small">${S.gifsEnabled ? 'No GIFs found.' : 'GIF search turns on when the server owner adds a free TENOR_API_KEY or GIPHY_API_KEY. You can still paste any GIF link or upload a GIF.'}</p>`;
+      : `<p class="muted small gif-empty">${S.gifsEnabled ? 'No GIFs found.' : '<b>GIF search not set up yet.</b><br>You can still paste a GIF link or upload a GIF.'}</p>`;
     $('#gif-grid').querySelectorAll('img').forEach((i) => (i.onclick = () => { hidePop(); send({ attachments: [{ url: i.dataset.full, type: 'image/gif', gif: true, name: 'GIF' }] }); }));
   };
   let t; $('#gif-q').oninput = (e) => { clearTimeout(t); t = setTimeout(() => load(e.target.value), 350); }; $('#gif-q').focus(); load('');
@@ -487,6 +529,8 @@ async function profilePopover(uid, x, y) {
     ${u.custom_status ? `<div style="margin-top:6px">${esc(u.custom_status)}</div>` : ''}
     ${u.bio ? `<div class="side-cat" style="padding-left:0">About me</div><div class="small" style="white-space:pre-wrap">${markdown(u.bio)}</div>` : ''}
     ${u.connections?.length ? `<div class="side-cat" style="padding-left:0">Connections</div><div class="conns">${u.connections.map((c) => `<span class="conn">${CONN_ICONS[c.type] || '🔗'} ${esc(c.name)}</span>`).join('')}</div>` : ''}
+    ${u.interests?.length ? `<div class="side-cat" style="padding-left:0">Interests</div><div class="interests">${u.interests.map((t) => `<span class="itag">${esc(t)}</span>`).join('')}</div>` : ''}
+    ${u.is_bot ? '' : `<div class="side-cat" style="padding-left:0">Shards</div><div class="small shard-line">${ZI('sparkles')} Level ${u.shard_level || 0} · ${u.shards || 0} Shards${u.streak ? ` · ${u.streak}-day streak` : ''}</div>`}
     <div class="side-cat" style="padding-left:0">Member since</div><div class="small">${new Date(u.created_at).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })}</div>
     ${u.mutual_servers?.length && !me ? `<div class="side-cat" style="padding-left:0">Mutual servers — ${u.mutual_servers.length}</div>` : ''}</div>
     <div class="row" style="justify-content:flex-start">${me ? '<button class="btn primary sm" id="pp-edit">Edit Profile</button>' :
@@ -504,11 +548,11 @@ function renderMembers() {
   if (S.view.dm) { const d = S.dms.find((x) => x.id === S.view.dm); if (!d) return; box.innerHTML = `<h4>Members — ${d.members.length}</h4>` + d.members.map(memberRow).join(''); return; }
   if (!S.view.server) { box.innerHTML = ''; return; }
   const ms = (S.members[S.view.server] || []).map((m) => ({ ...m, online: S.users[m.id]?.online ?? m.online }));
-  const groups = [['Owner', ms.filter((m) => m.role === 'owner')], ['Admins', ms.filter((m) => m.role === 'admin')], ['Bots', ms.filter((m) => m.is_bot && m.role !== 'owner')],
-    ['Online', ms.filter((m) => m.role === 'member' && !m.is_bot && m.online)], ['Offline', ms.filter((m) => m.role === 'member' && !m.is_bot && !m.online)]];
+  const rank = { owner: 0, admin: 1, member: 2 }; const sorter = (a, b) => (rank[a.role] ?? 2) - (rank[b.role] ?? 2) || (a.display_name || '').localeCompare(b.display_name || '');
+  const groups = [['Online', ms.filter((m) => m.online || m.is_bot).sort(sorter)], ['Offline', ms.filter((m) => !m.online && !m.is_bot).sort(sorter)]];
   box.innerHTML = groups.filter((g) => g[1].length).map(([t, l]) => `<h4>${t} — ${l.length}</h4>` + l.map(memberRow).join('')).join('');
 }
-function memberRow(m) { const u = S.users[m.id] || m; return `<div class="member ${u.online || u.is_bot ? '' : 'off'}${plateClass(u)}" data-member="${m.id}">${avatar(u, 32, true)}<div style="min-width:0"><div>${esc(u.display_name)} ${u.is_owner ? '<span class="tag owner">OWNER</span>' : ''}${u.is_bot ? '<span class="tag">BOT</span>' : ''}</div><div class="st">${esc(u.custom_status || '')}</div></div></div>`; }
+function memberRow(m) { const u = S.users[m.id] || m; return `<div class="member ${u.online || u.is_bot ? '' : 'off'}${plateClass(u)}" data-member="${m.id}">${avatar(u, 32, true)}<div style="min-width:0"><div class="mname" style="${m.role === 'owner' ? 'color:#f0b232' : m.role === 'admin' ? 'color:#eb459e' : ''}">${esc(u.display_name)}${m.role === 'owner' ? `<span class="crown" title="Server owner">${ZI('crown')}</span>` : ''} ${u.is_owner ? '<span class="tag owner">OWNER</span>' : ''}${u.is_bot ? '<span class="tag">BOT</span>' : ''}</div><div class="st">${esc(u.custom_status || '')}</div></div></div>`; }
 $('#members').addEventListener('click', (e) => { const r = e.target.closest('[data-member]'); if (r) profilePopover(r.dataset.member, e.clientX - 360, e.clientY); });
 $('#members').addEventListener('contextmenu', (e) => {
   const r = e.target.closest('[data-member]'); const s = curServer(); if (!r || !s || !['owner', 'admin'].includes(s.my_role) || r.dataset.member === S.me.id) return; e.preventDefault();
@@ -520,7 +564,7 @@ $('#members').addEventListener('contextmenu', (e) => {
 // server modals
 function serverMenu(s, x, y) {
   const admin = ['owner', 'admin'].includes(s.my_role);
-  menu(x, y, [['📨 Invite people', () => inviteModal(s)], admin && ['⚙️ Server settings', () => serverSettingsModal(s)], admin && ['➕ Create channel', () => createChannelModal(s)], ['📅 Events', () => window.ZE?.open(s)], ['🏆 Leaderboard', () => leaderboardModal(s)], admin && ['😀 Emoji & stickers', () => emojiAdminModal(s)],
+  menu(x, y, [['📨 Invite people', () => inviteModal(s)], admin && ['⚙️ Server settings', () => serverSettingsModal(s)], admin && ['🚪 Customize lobby', () => window.ZL?.edit(s)], admin && s.join_mode === 'apply' && ['📋 Join requests', () => window.ZJ?.requests(s)], admin && ['➕ Create channel', () => createChannelModal(s)], ['📅 Events', () => window.ZE?.open(s)], ['🏆 Leaderboard', () => leaderboardModal(s)], admin && ['😀 Emoji & stickers', () => emojiAdminModal(s)],
     admin && S.bots.length && ['🤖 Add one of my bots', () => addBotToServerModal(s)], s.my_role === 'owner' && !s.is_official && ['🗑️ Delete server', () => confirm(`Delete ${s.name}? This can't be undone.`) && tryRun(async () => { await api('/servers/' + s.id, { method: 'DELETE' }); }), 'danger'],
     s.my_role !== 'owner' && ['🚪 Leave server', () => confirm('Leave ' + s.name + '?') && tryRun(async () => { await api(`/servers/${s.id}/leave`, { body: {} }); S.servers = S.servers.filter((x) => x.id !== s.id); openHome(); }), 'danger']]);
 }
@@ -540,7 +584,7 @@ function addServerModal() {
     $('#js', mm).onsubmit = (e) => { e.preventDefault(); tryRun(async () => joined(await api('/invite/' + encodeURIComponent(e.target.code.value.trim()), { body: {} }))); }; };
   $('#c-disc', m).onclick = () => discoverModal();
 }
-function joined(s) { if (!S.servers.find((x) => x.id === s.id)) S.servers.push(s); closeModal(); openChannel(s.id, s.channels[0]?.id); }
+function joined(s) { if (s?.needs_application) return window.ZJ?.apply(s); if (!S.servers.find((x) => x.id === s.id)) S.servers.push(s); closeModal(); openChannel(s.id, s.channels[0]?.id); }
 async function discoverModal(q = '') {
   const list = await api('/servers/discover?q=' + encodeURIComponent(q));
   const m = modal(`<h2>Discover communities</h2><input id="disc-q" placeholder="Search servers" value="${esc(q)}"><div class="grid" style="margin-top:12px">${list.map((s) => `<div class="card"><div class="cb" style="${s.banner ? `background-image:url('${esc(s.banner)}')` : ''}"></div>
@@ -562,14 +606,18 @@ function serverSettingsModal(s) {
   const m = modal(`<h2>Server settings</h2><form id="ss"><label>Name<input name="name" value="${esc(s.name)}"></label><label>Description<input name="description" value="${esc(s.description || '')}"></label>
     <label>Icon<input type="file" name="icon" accept="image/*"></label><label>Banner<input type="file" name="banner" accept="image/*"></label>
     <label style="display:flex;align-items:center;gap:8px;text-transform:none"><input type="checkbox" name="pub" ${s.is_public ? 'checked' : ''} style="width:auto"> Show in Discover</label>
-    <div class="row"><button class="btn primary">Save</button></div></form>`);
+    ${s.is_official ? '' : `<label>Who can join<select name="join_mode"><option value="open" ${s.join_mode !== 'apply' ? 'selected' : ''}>Anyone with the link</option><option value="apply" ${s.join_mode === 'apply' ? 'selected' : ''}>Apply and get approved</option></select></label>
+    <label>Application questions <span class="small muted">(one per line, up to 5)</span><textarea name="join_questions" rows="3" placeholder="Why do you want to join?">${esc((() => { try { return JSON.parse(s.join_questions || '[]').join('\n'); } catch { return ''; } })())}</textarea></label>`}
+    <div class="row">${s.join_mode === 'apply' ? '<button type="button" class="btn" id="ss-req">Join requests</button>' : ''}<button type="button" class="btn" id="ss-lobby">Customize lobby</button><button class="btn primary">Save</button></div></form>`);
+  $('#ss-lobby', m).onclick = () => window.ZL?.edit(s); $('#ss-req', m) && ($('#ss-req', m).onclick = () => window.ZJ?.requests(s));
   $('#ss', m).onsubmit = (e) => { e.preventDefault(); tryRun(async () => { const f = e.target; const body = { name: f.name.value, description: f.description.value, is_public: f.pub.checked };
+    if (f.join_mode) { body.join_mode = f.join_mode.value; body.join_questions = f.join_questions.value.split('\n').map((x) => x.trim()).filter(Boolean); }
     if (f.icon.files[0]) body.icon = await uploadOne(f.icon.files[0]); if (f.banner.files[0]) body.banner = await uploadOne(f.banner.files[0]);
     await api('/servers/' + s.id, { method: 'PATCH', body }); closeModal(); toast('Saved'); }); };
 }
 function createChannelModal(s, preType) {
   const m = modal(`<h2>Create channel</h2><form id="cc"><label>Channel name<input name="name" required placeholder="new-channel"></label><label>Topic<input name="topic"></label>
-    <label>Type<select name="type"><option value="text"># Text — anyone can chat</option><option value="announcement">Announcement — only admins post</option><option value="voice" ${preType === 'voice' ? 'selected' : ''}>Voice — talk, video, screen share</option></select></label><div class="row"><button class="btn primary">Create</button></div></form>`);
+    <label>Type<select name="type"><option value="text"># Text — anyone can chat</option><option value="announcement">Announcement — only admins post</option><option value="forum">Forum — posts with a title, each one a thread</option><option value="voice" ${preType === 'voice' ? 'selected' : ''}>Voice — talk, video, screen share</option></select></label><div class="row"><button class="btn primary">Create</button></div></form>`);
   $('#cc', m).onsubmit = (e) => { e.preventDefault(); tryRun(async () => { const c = await api(`/servers/${s.id}/channels`, { body: Object.fromEntries(new FormData(e.target)) }); closeModal(); if (c.type !== 'voice') setTimeout(() => openChannel(s.id, c.id), 200); }); };
 }
 function editChannelModal(s, c) {
@@ -667,7 +715,7 @@ function settingsModal(tab = 'profile') {
     if (t === 'profile') {
       body.innerHTML = `<div style="display:flex;gap:20px;flex-wrap:wrap"><form id="pf" style="flex:1;min-width:260px"><label>Display name<input name="display_name" value="${esc(u.display_name)}" maxlength="32"></label>
         <label>Pronouns<input name="pronouns" value="${esc(u.pronouns || '')}" maxlength="40"></label><label>Custom status<input name="custom_status" value="${esc(u.custom_status || '')}" placeholder="Playing Roblox"></label>
-        <label>About me<textarea name="bio" rows="3" maxlength="400">${esc(u.bio || '')}</textarea></label><label>Avatar (images or GIFs, free)<input type="file" name="avatar" accept="image/*"></label>
+        <label>About me<textarea name="bio" rows="3" maxlength="400">${esc(u.bio || '')}</textarea></label><label>Interests <span class="small muted">(games, music, anime, shows; separate with commas)</span><input name="interests" maxlength="400" value="${esc((u.interests || []).join(', '))}" placeholder="Minecraft, lo-fi, One Piece"></label><label>Avatar (images or GIFs, free)<input type="file" name="avatar" accept="image/*"></label>
         <label>Banner (images or GIFs, free)<input type="file" name="banner" accept="image/*"></label><label>Name font (free)<select name="name_font"><option value="">Default</option>${NAME_FONTS.map((f) => `<option value="${f[0]}" ${u.name_font === f[0] ? 'selected' : ''}>${f[1]}</option>`).join('')}</select></label>
         <label>Connections <span class="small muted">(shown on your profile)</span><div id="conn-list"></div><button type="button" class="btn sm" id="conn-add" style="margin-top:6px">+ Add connection</button></label>
         <label>Banner color<div class="color-row">${colors.map((c) => `<button type="button" data-color="${c}" style="background:${c}" class="${u.banner_color === c ? 'on' : ''}"></button>`).join('')}</div></label>
@@ -681,7 +729,7 @@ function settingsModal(tab = 'profile') {
       (u.connections || []).forEach(connRow); $('#conn-add').onclick = () => connRow();
       const patch = async (bd) => { const nu = await api('/me', { method: 'PATCH', body: bd }); Object.assign(S.me, nu); cacheUser(nu); renderMe(); draw('profile'); toast('Saved'); };
       $('#rm-av') && ($('#rm-av').onclick = () => tryRun(() => patch({ avatar: null }))); $('#rm-bn') && ($('#rm-bn').onclick = () => tryRun(() => patch({ banner: null })));
-      $('#pf').onsubmit = (e) => { e.preventDefault(); tryRun(async () => { const f = e.target; const bd = { display_name: f.display_name.value, pronouns: f.pronouns.value, custom_status: f.custom_status.value, bio: f.bio.value, banner_color: color, name_font: f.name_font.value || null,
+      $('#pf').onsubmit = (e) => { e.preventDefault(); tryRun(async () => { const f = e.target; const bd = { display_name: f.display_name.value, pronouns: f.pronouns.value, custom_status: f.custom_status.value, bio: f.bio.value, interests: f.interests.value.split(',').map((x) => x.trim()).filter(Boolean), banner_color: color, name_font: f.name_font.value || null,
           connections: [...body.querySelectorAll('.conn-row')].map((r) => ({ type: r.querySelector('select').value, name: r.querySelector('input').value.trim() })).filter((c) => c.name) };
         if (f.avatar.files[0]) bd.avatar = await uploadOne(f.avatar.files[0]); if (f.banner.files[0]) bd.banner = await uploadOne(f.banner.files[0]); await patch(bd); }); };
     }

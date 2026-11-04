@@ -2,6 +2,17 @@
 
 Free, real-time chat for communities. Everything other apps charge for (banners, animated avatar decorations, name plates, GIF avatars) is free on Zuno.
 
+## New in 1.2
+- A familiar dark layout: round server rail with pill indicators, collapsible channel categories, user panel with mute / deafen / settings, member list split into Online and Offline, line icons everywhere
+- Unread dots and @mention badges on channels and servers, animated "is typing..." indicator
+- Server **Lobby**: a home page for each server with banner and accent colours, tagline, buttons that jump to channels, featured channels and rules (owners/admins edit it)
+- **Forum** channels: posts with a title, a searchable post list, every post opens its own thread
+- **Quiz polls** with one correct answer
+- **Join control**: "anyone with the link" or "apply and get approved" with application questions and a join-requests list
+- Profile **interests** and a **Suggested** friends tab ranked by shared servers and interests
+- **Shards**: free points for daily streaks and chatting, with levels on your profile
+- GIF search powered by **KLIPY** (set `KLIPY_API_KEY`)
+
 ## New in 1.1
 - 🔊 Voice channels and 📞 DM / group calls with ringtone
 - 🎥 Camera, 🖥️ screen share, mute / deafen, speaking rings
@@ -39,16 +50,16 @@ npm start
 ```
 
 ## Turn on GIF search (free)
-Get a free key from https://developers.giphy.com or Google Tenor, then set one of:
+Get a free KLIPY key at https://klipy.com/developers, then set it:
 ```bash
-GIPHY_API_KEY=your_key npm start
-TENOR_API_KEY=your_key npm start
+KLIPY_API_KEY=your_key npm start
 ```
+(Older `GIPHY_API_KEY` / `TENOR_API_KEY` still work as fallbacks.)
 Without a key, users can still paste GIF links and upload GIFs.
 
 ## Host it free on Render
 1. On render.com, choose **New → Blueprint** and pick this repo (it reads `render.yaml`).
-2. Add `GIPHY_API_KEY` in the Environment tab if you want GIF search.
+2. Add `KLIPY_API_KEY` in the Environment tab if you want GIF search.
 
 Note: Render's free plan has no permanent disk, so the database and uploads reset when the app restarts. For permanent data, add a disk (paid) and set `DATA_DIR` to it, or host on any VPS.
 
@@ -57,4 +68,7 @@ Note: Render's free plan has no permanent disk, so the database and uploads rese
 |---|---|---|
 | `PORT` | 3000 | Web port |
 | `DATA_DIR` | `./data` | Where the database and uploads live |
-| `GIPHY_API_KEY` / `TENOR_API_KEY` | none | Turns on GIF search |
+| `KLIPY_API_KEY` | none | Turns on GIF search (KLIPY) |
+| `GIPHY_API_KEY` / `TENOR_API_KEY` | none | Older GIF search fallbacks |
+| `TURSO_URL` / `TURSO_TOKEN` | none | Permanent storage in Turso |
+| `TURN_URL` / `TURN_USER` / `TURN_PASS` | none | Your own TURN server for voice |

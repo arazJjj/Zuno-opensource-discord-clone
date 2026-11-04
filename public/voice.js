@@ -149,7 +149,7 @@ window.ZV = (() => {
       $('#vb-mute').onclick = toggleMute; $('#vb-deaf').onclick = toggleDeaf; $('#vb-cam').onclick = toggleCam; $('#vb-screen').onclick = toggleScreen;
       $('#vb-leave').onclick = () => leave(); $('#vb-stage').onclick = $('#vb-open').onclick = () => openStage();
     }
-    renderStage();
+    renderStage(); try { renderMe(); } catch {}
     if (S.view?.type === 'server') renderSidebar();
   }
   function openStage() { V.stageOpen = true; renderStage(); }
@@ -292,5 +292,5 @@ window.ZV = (() => {
     };
   }
 
-  return { bind, join, leave, listHtml, settings, get room() { return V.room; }, get deaf() { return V.deaf; }, activityOf: (r) => V.rooms[r]?.activity };
+  return { bind, join, leave, listHtml, settings, toggleMute: () => toggleMute(), toggleDeaf: () => toggleDeaf(), get muted() { return V.muted; }, get room() { return V.room; }, get deaf() { return V.deaf; }, activityOf: (r) => V.rooms[r]?.activity };
 })();

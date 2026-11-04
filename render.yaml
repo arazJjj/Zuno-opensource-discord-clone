@@ -8,5 +8,7 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
+      - key: KLIPY_API_KEY
+        sync: false
       - key: GIPHY_API_KEY
         sync: false

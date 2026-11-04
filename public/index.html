@@ -8,6 +8,7 @@
 <link rel="icon" href="/logo.svg">
 <link rel="manifest" href="/manifest.json">
 <link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/discord.css">
 </head>
 <body>
 <!-- AUTH -->
@@ -37,11 +38,11 @@
 <!-- APP -->
 <div id="app" class="app hidden">
   <nav class="rail" id="rail">
-    <button class="rail-btn home" id="home-btn" title="Direct Messages"><img src="/logo.svg" alt="Home"></button>
+    <div class="rail-item"><span class="pill"></span><button class="rail-btn home" id="home-btn" title="Direct Messages"><img src="/logo.svg" alt="Home"></button></div>
     <div class="rail-sep"></div>
     <div id="server-list"></div>
-    <button class="rail-btn add" id="add-server-btn" title="Add a server">+</button>
-    <button class="rail-btn add" id="discover-btn" title="Discover servers">🧭</button>
+    <div class="rail-item"><span class="pill"></span><button class="rail-btn add" id="add-server-btn" title="Add a server"><svg class="zi" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button></div>
+    <div class="rail-item"><span class="pill"></span><button class="rail-btn add" id="discover-btn" title="Discover servers"><svg class="zi" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-2.12 6.36-6.36 2.12 2.12-6.36z"/></svg></button></div>
   </nav>
 
   <aside class="sidebar" id="sidebar">
@@ -61,11 +62,11 @@
           <div class="reply-bar hidden" id="reply-bar"></div>
           <div class="upload-preview" id="upload-preview"></div>
           <div class="composer-row">
-            <input type="file" id="file-input" multiple hidden><button class="icon-btn" id="plus-btn" title="Upload, poll, sticker">＋</button>
+            <input type="file" id="file-input" multiple hidden><button class="icon-btn" id="plus-btn" title="Upload a file, create a poll, send a sticker"><svg class="zi" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/></svg></button>
             <textarea id="input" rows="1" placeholder="Message"></textarea>
-            <button class="icon-btn" id="gif-btn" title="GIFs">GIF</button>
-            <button class="icon-btn" id="emoji-btn" title="Emoji">😊</button>
-            <button class="icon-btn send" id="send-btn" title="Send">➤</button>
+            <button class="icon-btn" id="gif-btn" title="Search GIFs">GIF</button>
+            <button class="icon-btn" id="emoji-btn" title="Emoji"><svg class="zi" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg></button>
+            <button class="icon-btn send" id="send-btn" title="Send"><svg class="zi" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></svg></button>
           </div>
         </div>
       </section>
@@ -86,5 +87,6 @@
 <script src="/app.js"></script>
 <script src="/voice.js"></script>
 <script src="/extras.js"></script>
+<script src="/community.js"></script>
 </body>
 </html>
