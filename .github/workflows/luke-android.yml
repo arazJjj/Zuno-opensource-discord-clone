@@ -1,0 +1,41 @@
+name: Build Mr. Luke APK
+on:
+  push:
+    branches: [luke-game]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: '8.9' }
+      - name: Build signed release APK
+        working-directory: android
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          gradle assembleRelease --no-daemon --stacktrace
+      - name: Rename and verify
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk MrLuke.apk
+          ls -l MrLuke.apk
+          BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
+          $BT/apksigner verify --print-certs MrLuke.apk
+          $BT/aapt dump badging MrLuke.apk | head -5
+          unzip -l MrLuke.apk | grep -E "assets/www/index.html|\.ogg" | head -30
+      - uses: actions/upload-artifact@v4
+        with: { name: MrLuke-apk, path: MrLuke.apk }
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: luke-v1
+          target_commitish: ${{ github.sha }}
+          name: "Mr. Luke's Teachings in Spelling and Technology (Android)"
+          body: "Offline Android build of Mr. Luke (build ${{ github.run_number }}, commit ${{ github.sha }}). Download MrLuke.apk and open it on your phone to install (allow installs from unknown sources)."
+          files: MrLuke.apk
+          overwrite_files: true
+          make_latest: false

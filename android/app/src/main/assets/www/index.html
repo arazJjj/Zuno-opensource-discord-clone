@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="screen-orientation" content="landscape">
+<title>Mr. Luke's Teachings in Spelling and Technology</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="game"></div>
+<div id="vignette"></div>
+
+<div id="hud" class="hidden">
+  <div id="topbar">
+    <button id="btnPause" class="hudbtn">II</button>
+    <div id="nbCount" class="pill">iPads: 0/7</div>
+    <div id="exitCount" class="pill hidden">Exits: 0/4</div>
+    <div id="detTimer" class="pill red hidden"></div>
+    <div id="passTimer" class="pill blue hidden"></div>
+  </div>
+  <canvas id="minimap" width="148" height="116"></canvas>
+  <div id="crosshair">+</div>
+  <div id="prompt" class="hidden"></div>
+  <div id="subs"></div>
+  <div id="bottom">
+    <div id="stamWrap"><div id="stamLabel">STAMINA</div><div id="stamBar"><div id="stamFill"></div></div></div>
+    <div id="slots"><div class="slot sel" data-i="0"></div><div class="slot" data-i="1"></div><div class="slot" data-i="2"></div></div>
+  </div>
+  <div id="touchLayer" class="hidden"></div>
+  <div id="touch" class="hidden">
+    <div id="joyBase"><div id="joyKnob"></div></div>
+    <button id="btnRun" class="tbtn">RUN</button>
+    <button id="btnUse" class="tbtn">USE</button>
+    <button id="btnItem" class="tbtn">ITEM</button>
+  </div>
+  <div id="rope" class="hidden">
+    <div class="ropeTitle">Skippy's Jump Rope! <span id="ropeCount">0/5</span></div>
+    <div id="ropeTrack"><div id="ropeZone"></div><div id="ropeMarker"></div></div>
+    <div class="ropeHint">Press SPACE / tap JUMP when the marker is in the green zone</div>
+    <button id="btnJump" class="bigbtn">JUMP!</button>
+  </div>
+</div>
+
+<div id="quiz" class="hidden">
+  <div id="quizPanel">
+    <div id="quizHead"><span id="quizTitle">iPad #1</span><span id="quizProg">Question 1/3</span></div>
+    <div id="quizKind">Spelling</div>
+    <div id="quizQ"></div>
+    <div id="quizAns"><span id="quizAnsText"></span><span class="caret">|</span></div>
+    <div id="quizFb"></div>
+    <div id="kbd"></div>
+  </div>
+</div>
+
+<div id="title" class="screen">
+  <div class="titleInner">
+    <canvas id="titleArt" width="128" height="256"></canvas>
+    <div class="titleText">
+      <h1>Mr. Luke's</h1>
+      <h2>Teachings in Spelling<br>and Technology</h2>
+      <div class="menu">
+        <button class="mbtn" id="btnStart">PLAY</button>
+        <button class="mbtn" id="btnHow">HOW TO PLAY</button>
+        <button class="mbtn" id="btnSettings">SETTINGS</button>
+        <button class="mbtn" id="btnCredits">CREDITS</button>
+      </div>
+      <div class="small">An original fan game inspired by 90s edutainment horror. All art &amp; sound made in code.</div>
+    </div>
+  </div>
+</div>
+
+<div id="howto" class="screen hidden"><div class="panel">
+  <h2>How to Play</h2>
+  <ul>
+    <li>Find Mr. Luke's <b>7 iPads</b> in the classrooms. Each one gives you a 3-question quiz.</li>
+    <li>Get one wrong and Mr. Luke starts chasing you. Every wrong answer makes him faster. Don't get caught!</li>
+    <li>With all 7 iPads, reach <b>4 exits</b> around the school. Each exit closes behind you and things get... redder.</li>
+    <li><b>Principal Grant</b> sends runners in the halls to detention. <b>Skippy</b> won't let you pass until you do 5 rope jumps. <b>Broom Bot</b> sweeps you away. <b>Byte</b> has a gift.</li>
+    <li>Items: <b>ZAP energy drink</b> (stamina), <b>Quiet Bell</b> (lures Mr. Luke), <b>Hall Pass</b> (escape detention / Grant ignores you).</li>
+  </ul>
+  <p><b>PC:</b> WASD move, mouse look, Shift run, E / click use, Q / right-click item, 1-3 pick item, M map, Esc pause.<br>
+  <b>Touch:</b> left stick move, drag right side to look, RUN toggles running, USE picks up, ITEM uses selected item (tap a slot to select).</p>
+  <button class="mbtn back">BACK</button>
+</div></div>
+
+<div id="settings" class="screen hidden"><div class="panel">
+  <h2>Settings</h2>
+  <label>Look sensitivity <input type="range" id="setSens" min="0.2" max="3" step="0.1"><span id="setSensV"></span></label>
+  <label>Volume <input type="range" id="setVol" min="0" max="1" step="0.05"><span id="setVolV"></span></label>
+  <label>Graphics <select id="setQ"><option value="low">Low (fastest)</option><option value="med">Medium</option><option value="high">High</option></select></label>
+  <label>Minimap <input type="checkbox" id="setMap"></label>
+  <button class="mbtn back">BACK</button>
+</div></div>
+
+<div id="credits" class="screen hidden"><div class="panel">
+  <h2>Credits</h2>
+  <p>An original fan game. All art and sound effects are made in code. 3D engine: <b>Three.js</b> r149 (MIT licence).</p>
+  <p><b>Voices</b> are AI placeholder voices made offline with Piper TTS.<br>
+  Mr. Luke: <i>en_US-bryce-medium</i> (public domain). Principal Grant: <i>en_US-john-medium</i> (public domain, LibriVox).</p>
+  <p><b>Skippy:</b> Skippy's voice was generated with the Piper <i>en_US-libritts_r-medium</i> model, trained on LibriTTS-R
+  (Koizumi et al., 2023, http://www.openslr.org/141/), licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Modified (pitch and speed).</p>
+  <p>Voice models: https://huggingface.co/rhasspy/piper-voices</p>
+  <button class="mbtn back">BACK</button>
+</div></div>
+
+<div id="pause" class="screen hidden"><div class="panel">
+  <h2>Paused</h2>
+  <button class="mbtn" id="btnResume">RESUME</button>
+  <button class="mbtn" id="btnPSettings">SETTINGS</button>
+  <button class="mbtn" id="btnQuit">QUIT TO TITLE</button>
+</div></div>
+
+<div id="over" class="screen hidden"><div class="panel center">
+  <canvas id="overArt" width="128" height="256"></canvas>
+  <h2 class="redtxt">CAUGHT!</h2>
+  <p id="overMsg">Mr. Luke caught you.</p>
+  <button class="mbtn" id="btnRetry">TRY AGAIN</button>
+  <button class="mbtn" id="btnOverTitle">TITLE</button>
+</div></div>
+
+<div id="win" class="screen hidden"><div class="panel center">
+  <h2 class="greentxt">YOU ESCAPED!</h2>
+  <p id="winMsg"></p>
+  <button class="mbtn" id="btnAgain">PLAY AGAIN</button>
+  <button class="mbtn" id="btnWinTitle">TITLE</button>
+</div></div>
+
+<div id="rotate">Please rotate your device to landscape</div>
+<div id="err" class="hidden"></div>
+
+<script src="lib/three.min.js"></script>
+<script>window.LG = window.LG || {};</script>
+<script src="js/textures.js"></script>
+<script src="js/world.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/questions.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>

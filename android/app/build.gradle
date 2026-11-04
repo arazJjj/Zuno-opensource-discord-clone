@@ -1,0 +1,30 @@
+plugins { id 'com.android.application' }
+def runNo = (System.getenv("GITHUB_RUN_NUMBER") ?: "1") as int
+android {
+    namespace 'com.araz.lukegame'
+    compileSdk 34
+    defaultConfig {
+        applicationId "com.araz.lukegame"
+        minSdk 24
+        targetSdk 34
+        versionCode runNo
+        versionName "1.0." + runNo
+    }
+    signingConfigs {
+        release {
+            storeFile file("../keystore/luke-release.p12")
+            storePassword "mrluke-store"
+            keyAlias "mrluke"
+            keyPassword "mrluke-store"
+            storeType "pkcs12"
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+    androidResources { noCompress 'ogg' }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
