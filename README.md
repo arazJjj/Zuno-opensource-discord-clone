@@ -2,6 +2,13 @@
 
 Free, real-time chat for communities. Everything other apps charge for (banners, animated avatar decorations, name plates, GIF avatars) is free on Zuno.
 
+## New in 1.3
+- **Landing page** at `/` for visitors (the app now lives at `/app`; signed-in people and the Android app skip straight to it). "Download for Android" goes to `/download/android`, which always points at the newest release that has `Zuno.apk`.
+- **Friends page**: Online / All / Pending / Blocked / Suggested tabs, search, a green Add Friend button and an **Active Now** column.
+- **Message menu**: right-click a message (long-press on phones) for quick reactions, Add Reaction, Reply, Create Thread, Copy Text, Pin, Edit, Delete and Copy Message ID.
+- **Profile popout**: roles in the current server and a "Message @user" box that sends a DM straight away.
+- **User Settings** is now a full-screen view: My Account, Profiles, Privacy & Safety, Appearance, Voice & Video, Notifications, Keybinds, Get the App and Log Out, with an Esc close button.
+
 ## New in 1.2
 - A familiar dark layout: round server rail with pill indicators, collapsible channel categories, user panel with mute / deafen / settings, member list split into Online and Offline, line icons everywhere
 - Unread dots and @mention badges on channels and servers, animated "is typing..." indicator

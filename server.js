@@ -270,7 +270,27 @@ const io = new Server(server, { maxHttpBufferSize: 1e7 });
 const online = new Map(); // userId -> socket count
 
 app.use(express.json({ limit: '2mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+// Landing page for visitors at "/"; the app itself lives at /app (signed-in visitors are sent there by the page).
+app.get(['/', '/index.html'], (req, res) => res.sendFile(path.join(__dirname, 'public', 'landing.html')));
+app.get('/app', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+// "Download for Android": newest GitHub release that carries Zuno.apk (other apps share the repo's releases)
+const APK_REPO = 'arazJjj/Zuno-opensource-discord-clone';
+let apkCache = { url: null, at: 0 };
+app.get('/download/android', async (req, res) => {
+  const fallback = `https://github.com/${APK_REPO}/releases`;
+  try {
+    if (!apkCache.url || Date.now() - apkCache.at > 10 * 60e3) {
+      const r = await fetch(`https://api.github.com/repos/${APK_REPO}/releases?per_page=30`, { headers: { 'User-Agent': 'zuno-server', Accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(6000) });
+      const list = r.ok ? await r.json() : [];
+      const rel = (Array.isArray(list) ? list : []).filter((x) => !x.draft && (x.assets || []).some((a) => a.name === 'Zuno.apk'))
+        .sort((a, b) => new Date(b.published_at) - new Date(a.published_at))[0];
+      const asset = rel?.assets.find((a) => a.name === 'Zuno.apk');
+      if (asset) apkCache = { url: asset.browser_download_url, at: Date.now() };
+    }
+    res.redirect(302, apkCache.url || fallback);
+  } catch { res.redirect(302, apkCache.url || fallback); }
+});
+app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d' }));
 
 const upload = multer({

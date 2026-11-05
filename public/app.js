@@ -37,7 +37,7 @@ function logout() { if (S.token) fetch('/api/logout', { method: 'POST', headers:
 
 // ---------- start ----------
 async function start() {
-  if (!S.token) return showAuth();
+  if (!S.token) return showAuth(/register|signup/.test(location.hash + location.search) ? 'register' : 'login');
   let b; try { b = await api('/bootstrap'); } catch { return showAuth(); }
   Object.assign(S, { me: b.me, servers: b.servers, dms: b.dms, friends: b.friends, inventory: b.inventory, shop: b.shop, bots: b.bots, reads: b.reads, gifsEnabled: b.gifs_enabled, emojis: b.emojis || [] });
   cacheUser(b.me); b.dms.forEach((d) => d.members.forEach(cacheUser)); b.friends.forEach((f) => cacheUser(f.user));
@@ -78,7 +78,7 @@ function connect() {
   socket.on('message:update', (m) => { const i = S.messages.findIndex((x) => x.id === m.id); if (i > -1) { S.messages[i] = m; if (curChannel()?.type === 'forum' && window.ZF) { ZF.render(); return; } const el = document.querySelector(`[data-mid="${m.id}"]`); if (el) el.replaceWith(msgEl(m, el.classList.contains('first'))); } });
   socket.on('message:delete', ({ id }) => { S.messages = S.messages.filter((m) => m.id !== id); document.querySelector(`[data-mid="${id}"]`)?.remove(); });
   socket.on('typing', (t) => { if ((t.channel_id && t.channel_id === S.view.channel) || (t.dm_id && t.dm_id === S.view.dm)) { S.typing[t.user_id] = { name: t.name, at: Date.now() }; renderTyping(); } });
-  socket.on('presence', ({ user_id, online }) => { if (S.users[user_id]) S.users[user_id].online = online; for (const k in S.members) S.members[k].forEach((m) => { if (m.id === user_id) m.online = online; }); renderMembers(); if (S.view.type === 'home') renderSidebar(); });
+  socket.on('presence', ({ user_id, online }) => { if (S.users[user_id]) S.users[user_id].online = online; for (const k in S.members) S.members[k].forEach((m) => { if (m.id === user_id) m.online = online; }); renderMembers(); if (S.view.type === 'home') { renderSidebar(); if (!S.view.dm && (S.fTab || 'online') === 'online') renderFriendList(); } });
   socket.on('user:update', (u) => { cacheUser(u); if (u.id === S.me.id) { Object.assign(S.me, u); renderMe(); } for (const k in S.members) S.members[k] = S.members[k].map((m) => (m.id === u.id ? { ...m, ...u } : m)); renderMembers(); });
   socket.on('server:update', (s) => { setTimeout(() => { if (S.view.lobby && S.view.server === s.id && window.ZL) ZL.render(S.servers.find((x) => x.id === s.id) || s); }, 0); const i = S.servers.findIndex((x) => x.id === s.id); const role = S.servers[i]?.my_role; if (i > -1) S.servers[i] = { ...s, my_role: role }; renderRail(); renderSidebar(); renderHead(); });
   socket.on('server:delete', ({ id }) => { S.servers = S.servers.filter((s) => s.id !== id); if (S.view.server === id) openHome(); renderRail(); });
@@ -163,7 +163,7 @@ function saveView() { localStorage.zunoView = JSON.stringify({ server: S.view.se
 function closeNav() { document.body.classList.remove('nav-open'); }
 function openHome(tab) {
   S.view = { type: 'home', server: null, channel: null, dm: null, homeTab: tab || S.view.homeTab || 'friends' }; saveView();
-  renderRail(); renderSidebar(); renderHead(); renderFriends(); $('#composer').classList.add('hidden'); $('#members').innerHTML = ''; $('#typing').innerHTML = '';
+  renderRail(); renderSidebar(); renderHead(); $('#typing').innerHTML = ''; renderFriends(); $('#composer').classList.add('hidden');
 }
 async function openChannel(sid, cid) {
   if (!cid) return;
@@ -269,8 +269,8 @@ function renderHead() {
   if (S.view.lobby) { const s = curServer(); h.innerHTML = `${menu}<span class="ch-icon">${ZI('door')}</span><span class="title">${esc(s?.name || '')} Lobby</span><span class="topic">${esc(lobbyOf(s).tagline || s?.description || '')}</span><div class="tools"><button id="invite-btn" title="Invite">${ZI('mailPlus')}</button><button id="mem-toggle" title="Member list">${ZI('users')}</button></div>`;
     $('#invite-btn').onclick = () => inviteModal(s); }
   else if (S.view.type === 'home' && !S.view.dm) {
-    const tabs = ['online', 'all', 'pending', 'suggested', 'blocked'];
-    h.innerHTML = `${menu}<span class="ch-icon">${ZI('users')}</span><span class="title">Friends</span><div class="tabs" style="margin:0 0 0 12px">${tabs.map((t) => `<button data-ftab="${t}" class="${(S.fTab || 'online') === t ? 'on' : ''}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}<button class="btn green sm" data-ftab="add">Add Friend</button></div>`;
+    const tabs = ['online', 'all', 'pending', 'blocked', 'suggested']; const pendN = S.friends.filter((f) => f.status === 'incoming').length;
+    h.innerHTML = `${menu}<span class="ch-icon">${ZI('users')}</span><span class="title">Friends</span><div class="tabs" style="margin:0 0 0 12px">${tabs.map((t) => `<button data-ftab="${t}" class="${(S.fTab || 'online') === t ? 'on' : ''}">${t[0].toUpperCase() + t.slice(1)}${t === 'pending' && pendN ? `<span class="badge">${pendN}</span>` : ''}</button>`).join('')}<button class="btn green sm ${S.fTab === 'add' ? 'on' : ''}" data-ftab="add">Add Friend</button></div>`;
     h.querySelectorAll('[data-ftab]').forEach((b) => (b.onclick = () => { S.fTab = b.dataset.ftab; renderHead(); renderFriends(); }));
   } else if (S.view.dm) {
     const d = S.dms.find((x) => x.id === S.view.dm); if (!d) return;
@@ -293,24 +293,48 @@ function renderHead() {
 document.addEventListener('click', (e) => { if (document.body.classList.contains('nav-open') && !e.target.closest('.rail,.sidebar,#menu-btn')) closeNav(); });
 
 // ---------- friends page ----------
+const FRIEND_EMPTY = { online: "Nobody's online right now. Your friends will show up here when they are.", all: 'No friends yet. Tap Add Friend to send someone a request.', pending: 'No pending friend requests.', blocked: "You haven't blocked anyone." };
 function renderFriends() {
-  $('#composer').classList.add('hidden');
+  $('#composer').classList.add('hidden'); renderMembers();
   const tab = S.fTab || 'online'; const box = $('#messages');
   if (tab === 'suggested' && window.ZSug) return ZSug.render(box);
   if (tab === 'add') {
-    box.innerHTML = `<div class="welcome"><h2>Add Friend</h2><p class="muted">Add friends with their Zuno username.</p>
-      <form id="add-friend" style="display:flex;gap:8px;max-width:560px"><input name="username" placeholder="Enter a username" required><button class="btn primary">Send Request</button></form></div>`;
-    $('#add-friend').onsubmit = (e) => { e.preventDefault(); tryRun(async () => { await api('/friends', { body: { username: e.target.username.value } }); toast('Friend request sent!'); e.target.reset(); }); };
+    box.innerHTML = `<div class="add-friend"><h2>Add Friend</h2><p class="muted">You can add friends with their Zuno username.</p>
+      <form id="add-friend" class="af-form"><input name="username" placeholder="Enter a Zuno username" required autocomplete="off" maxlength="32"><button class="btn primary">Send Friend Request</button></form></div>
+      <div class="af-sep"></div><div class="add-friend"><h3>Other places to make friends</h3><button class="af-tile" id="af-explore"><span class="af-ic">${ZI('compass')}</span><span class="grow">Explore public servers</span>${ZI('chevronRight')}</button>
+      <button class="af-tile" id="af-sug"><span class="af-ic">${ZI('sparkles')}</span><span class="grow">People who share your interests</span>${ZI('chevronRight')}</button></div>`;
+    $('#add-friend').onsubmit = (e) => { e.preventDefault(); tryRun(async () => { await api('/friends', { body: { username: e.target.username.value.trim().replace(/^@/, '') } }); toast('Friend request sent!'); e.target.reset(); }); };
+    $('#af-explore').onclick = () => discoverModal(); $('#af-sug').onclick = () => { S.fTab = 'suggested'; renderHead(); renderFriends(); };
     return;
   }
-  const list = S.friends.filter((f) => tab === 'all' ? f.status === 'friend' : tab === 'online' ? f.status === 'friend' && (S.users[f.user.id]?.online) : tab === 'pending' ? ['incoming', 'outgoing'].includes(f.status) : f.status === 'blocked');
-  box.innerHTML = `<div style="padding:16px"><div class="side-cat">${tab} — ${list.length}</div>${list.map((f) => `<div class="friend-row" data-uid="${f.user.id}">${avatar(f.user, 36, true)}
-    <div class="grow"><b>${esc(f.user.display_name)}</b> <span class="muted small">@${esc(f.user.username)}</span><div class="small muted">${f.status === 'incoming' ? 'Incoming request' : f.status === 'outgoing' ? 'Outgoing request' : esc(f.user.custom_status || (S.users[f.user.id]?.online ? 'Online' : 'Offline'))}</div></div>
-    ${f.status === 'friend' ? `<button class="btn sm" data-fa="msg">💬</button><button class="btn sm" data-fa="remove">✕</button>` : ''}
-    ${f.status === 'incoming' ? `<button class="btn green sm" data-fa="accept">✓</button><button class="btn sm" data-fa="decline">✕</button>` : ''}
-    ${f.status === 'outgoing' ? `<button class="btn sm" data-fa="decline">Cancel</button>` : ''}${f.status === 'blocked' ? `<button class="btn sm" data-fa="unblock">Unblock</button>` : ''}</div>`).join('') ||
-    `<div class="welcome" style="text-align:center"><img src="/logo.svg" width="96"><p class="muted">${tab === 'online' ? "No one's around to play with Wumpus... just kidding, there's no Wumpus here. Add some friends!" : 'Nothing here yet.'}</p></div>`}</div>`;
-  box.querySelectorAll('[data-fa]').forEach((b) => (b.onclick = () => tryRun(async () => { const uid = b.closest('[data-uid]').dataset.uid; if (b.dataset.fa === 'msg') return startDm(uid); await api(`/friends/${uid}/${b.dataset.fa}`, { body: {} }); })));
+  box.innerHTML = `<div class="friends-page"><div class="f-search"><input id="f-search" placeholder="Search" autocomplete="off" value="${esc(S.fSearch || '')}">${ZI('search')}</div><div id="f-list"></div></div>`;
+  $('#f-search').oninput = (e) => { S.fSearch = e.target.value; renderFriendList(); };
+  renderFriendList();
+}
+function renderFriendList() {
+  const el = $('#f-list'); if (!el) return; const tab = S.fTab || 'online'; const q = (S.fSearch || '').trim().toLowerCase();
+  const online = (f) => S.users[f.user.id]?.online;
+  let list = S.friends.filter((f) => tab === 'all' ? f.status === 'friend' : tab === 'online' ? f.status === 'friend' && online(f) : tab === 'pending' ? ['incoming', 'outgoing'].includes(f.status) : f.status === 'blocked');
+  if (q) list = list.filter((f) => (f.user.display_name + ' ' + f.user.username).toLowerCase().includes(q));
+  list.sort((a, b) => (a.status === 'incoming' ? -1 : 0) - (b.status === 'incoming' ? -1 : 0) || (a.user.display_name || '').localeCompare(b.user.display_name || ''));
+  const label = { online: 'Online', all: 'All friends', pending: 'Pending', blocked: 'Blocked' }[tab] || tab;
+  const sub = (f) => f.status === 'incoming' ? 'Incoming Friend Request' : f.status === 'outgoing' ? 'Outgoing Friend Request' : f.status === 'blocked' ? 'Blocked' : (S.users[f.user.id]?.custom_status || f.user.custom_status || (online(f) ? 'Online' : 'Offline'));
+  const act = (fa, icon, title, cls = '') => `<button class="f-act ${cls}" data-fa="${fa}" title="${title}" aria-label="${title}">${ZI(icon)}</button>`;
+  el.innerHTML = `<div class="f-count">${label} — ${list.length}</div>` + (list.map((f) => { const u = S.users[f.user.id] || f.user;
+    return `<div class="friend-row f2" data-uid="${u.id}">${avatar(u, 32, true)}<div class="grow"><div class="fname"><b>${esc(u.display_name)}</b><span class="uname">${esc(u.username)}</span></div><div class="small muted cstatus">${esc(sub(f))}</div></div>
+      <div class="f-acts">${f.status === 'friend' ? act('msg', 'message', 'Message') + act('more', 'moreH', 'More') : ''}${f.status === 'incoming' ? act('accept', 'check', 'Accept', 'ok') + act('decline', 'x', 'Ignore', 'no') : ''}${f.status === 'outgoing' ? act('decline', 'x', 'Cancel', 'no') : ''}${f.status === 'blocked' ? act('unblock', 'x', 'Unblock', 'no') : ''}</div></div>`; }).join('') ||
+    `<div class="f-empty"><img src="/logo.svg" width="88" alt=""><p class="muted">${q ? 'No one matches that search.' : FRIEND_EMPTY[tab] || 'Nothing here yet.'}</p></div>`);
+  el.querySelectorAll('.friend-row').forEach((row) => (row.onclick = (e) => {
+    const uid = row.dataset.uid; const b = e.target.closest('[data-fa]'); const f = S.friends.find((x) => x.user.id === uid);
+    if (!b) { if (f?.status === 'friend') return tryRun(() => startDm(uid)); return profilePopover(uid, e.clientX, e.clientY); }
+    e.stopPropagation(); const fa = b.dataset.fa;
+    if (fa === 'msg') return tryRun(() => startDm(uid));
+    if (fa === 'more') { const r = b.getBoundingClientRect(); return menu(r.left - 150, r.bottom + 4, [['Start Voice Call', () => tryRun(async () => { await startDm(uid); const d = S.dms.find((x) => x.id === S.view.dm); if (d) window.ZV?.join('dm:' + d.id, dmName(d)); }), '', 'phone'],
+      ['Profile', () => profilePopover(uid, r.left - 200, r.bottom + 4), '', 'users'], '-',
+      ['Remove Friend', () => confirm('Remove ' + (f?.user.display_name || 'this friend') + ' as a friend?') && tryRun(() => api(`/friends/${uid}/remove`, { body: {} })), 'danger', 'x'],
+      ['Block', () => confirm('Block ' + (f?.user.display_name || 'this person') + '?') && tryRun(() => api(`/friends/${uid}/block`, { body: {} })), 'danger', 'hand']]); }
+    tryRun(() => api(`/friends/${uid}/${fa}`, { body: {} }));
+  }));
 }
 async function startDm(uid) { const d = await api('/dms', { body: { user_ids: [uid] } }); if (!d?.id) return toast('Could not open that DM'); if (!S.dms.find((x) => x.id === d.id)) S.dms.unshift(d); (d.members || []).forEach(cacheUser); closeModal(); hidePop(); openDm(d.id); }
 
@@ -390,10 +414,36 @@ function pollHtml(m) {
 }
 function messageMenu(m, x, y) {
   const s = curServer(); const mod = s && ['owner', 'admin'].includes(s.my_role); const mine = m.author_id === S.me.id;
-  menu(x, y, [['↩️ Reply', () => setReply(m)], mine && ['✏️ Edit', () => editMessage(m)], ['📋 Copy text', () => navigator.clipboard?.writeText(m.content)],
-    (mod || S.view.dm) && [m.pinned ? '📌 Unpin' : '📌 Pin', () => tryRun(() => api('/messages/' + m.id, { method: 'PATCH', body: { pinned: !m.pinned } }))],
-    ['🔗 Copy ID', () => navigator.clipboard?.writeText(m.id)], (mine || mod) && ['🗑️ Delete', () => confirm('Delete this message?') && tryRun(() => api('/messages/' + m.id, { method: 'DELETE' })), 'danger']]);
+  const react = (em) => tryRun(() => api(`/messages/${m.id}/react`, { body: { emoji: em } }));
+  const copy = (t, what) => { (navigator.clipboard?.writeText(t) || Promise.reject()).then(() => toast(what + ' copied'), () => { prompt('Copy:', t); }); };
+  const quick = ['👍', '❤️', '😂', '🔥'];
+  menu(x, y, [
+    ['Add Reaction', () => emojiPicker(x, y, react), '', 'smilePlus'],
+    ['Reply', () => setReply(m), '', 'reply'],
+    !m.thread_id && window.ZT && ['Create Thread', () => window.ZT.open(m), '', 'thread'], '-',
+    m.content && ['Copy Text', () => copy(m.content, 'Text'), '', 'copy'],
+    (mod || S.view.dm) && [m.pinned ? 'Unpin Message' : 'Pin Message', () => tryRun(() => api('/messages/' + m.id, { method: 'PATCH', body: { pinned: !m.pinned } })), '', 'pin'],
+    mine && m.content && ['Edit Message', () => editMessage(m), '', 'pencil'],
+    (mine || mod) && ['Delete Message', () => confirm('Delete this message?') && tryRun(() => api('/messages/' + m.id, { method: 'DELETE' })), 'danger', 'trash'], '-',
+    ['Copy Message ID', () => copy(m.id, 'Message ID'), '', 'clipboard']],
+    `<div class="ctx-quick" data-keep-emoji>${quick.map((e) => `<button data-q="${e}" title="React ${e}">${e}</button>`).join('')}</div>`);
+  $('#popover').querySelectorAll('[data-q]').forEach((b) => (b.onclick = () => { hidePop(); react(b.dataset.q); }));
 }
+// right-click a message (long-press on phones) for the message menu
+(() => {
+  const box = $('#messages'); let timer = null, start = null, longAt = 0;
+  const msgOf = (t) => { const el = t.closest?.('.msg[data-mid]'); return el && !t.closest('.edit-box,a,video,audio,.poll-opt,button.react') ? S.messages.find((x) => x.id === el.dataset.mid) : null; };
+  box.addEventListener('contextmenu', (e) => {
+    if (Date.now() - longAt < 900) { e.preventDefault(); return; }
+    if (String(getSelection?.() || '').trim()) return; const m = msgOf(e.target); if (!m) return;
+    e.preventDefault(); messageMenu(m, e.clientX, e.clientY);
+  });
+  box.addEventListener('touchstart', (e) => { const m = msgOf(e.target); if (!m || e.touches.length > 1) return; const t = e.touches[0]; start = { x: t.clientX, y: t.clientY };
+    clearTimeout(timer); timer = setTimeout(() => { longAt = Date.now(); navigator.vibrate?.(15); messageMenu(m, Math.min(start.x, innerWidth - 230), start.y); }, 480); }, { passive: true });
+  box.addEventListener('touchmove', (e) => { const t = e.touches[0]; if (start && Math.hypot(t.clientX - start.x, t.clientY - start.y) > 10) clearTimeout(timer); }, { passive: true });
+  box.addEventListener('touchend', (e) => { clearTimeout(timer); if (Date.now() - longAt < 600) e.preventDefault(); });
+  box.addEventListener('touchcancel', () => clearTimeout(timer));
+})();
 function editMessage(m) {
   const row = document.querySelector(`#messages [data-mid="${m.id}"]`) || document.querySelector(`[data-mid="${m.id}"]`); if (!row || row.querySelector('.edit-box')) return;
   const el = row.querySelector('.body'); const old = el.querySelector('.text');
@@ -512,7 +562,8 @@ function showPop(html, x, y, kind = '') { const p = $('#popover'); p.innerHTML =
   const w = p.offsetWidth, h = p.offsetHeight; p.style.left = Math.max(8, Math.min(x, innerWidth - w - 8)) + 'px'; p.style.top = Math.max(8, Math.min(y, innerHeight - h - 8)) + 'px'; }
 function hidePop() { const p = $('#popover'); p.classList.add('hidden'); p.dataset.kind = ''; }
 document.addEventListener('mousedown', (e) => { if (!e.target.closest('#popover') && !e.target.closest('#emoji-btn,#gif-btn')) hidePop(); });
-function menu(x, y, items) { items = items.filter(Boolean); showPop(`<div class="ctx">${items.map((it, i) => `<button data-i="${i}" class="${it[2] || ''}">${it[0]}</button>`).join('')}</div>`, x, y, 'menu');
+function menu(x, y, items, top = '') { items = items.filter(Boolean).filter((it, i, a) => it !== '-' || (i > 0 && i < a.length - 1 && a[i - 1] !== '-'));
+  showPop(`<div class="ctx">${top}${items.map((it, i) => it === '-' ? '<div class="ctx-sep"></div>' : `<button data-i="${i}" class="${it[2] || ''}${it[3] ? ' ic' : ''}"><span>${it[0]}</span>${it[3] ? ZI(it[3]) : ''}</button>`).join('')}</div>`, x, y, 'menu');
   $('#popover').querySelectorAll('[data-i]').forEach((b) => (b.onclick = () => { hidePop(); items[+b.dataset.i][1](); })); }
 function modal(html, cls = '') { closeModal(); const bg = document.createElement('div'); bg.className = 'modal-bg'; bg.innerHTML = `<div class="modal ${cls}"><button class="x" data-close>✕</button>${html}</div>`;
   bg.addEventListener('mousedown', (e) => { if (e.target === bg || e.target.closest('[data-close]')) closeModal(); }); $('#modal-root').appendChild(bg); return bg.querySelector('.modal'); }
@@ -532,11 +583,17 @@ async function profilePopover(uid, x, y) {
     ${u.interests?.length ? `<div class="side-cat" style="padding-left:0">Interests</div><div class="interests">${u.interests.map((t) => `<span class="itag">${esc(t)}</span>`).join('')}</div>` : ''}
     ${u.is_bot ? '' : `<div class="side-cat" style="padding-left:0">Shards</div><div class="small shard-line">${ZI('sparkles')} Level ${u.shard_level || 0} · ${u.shards || 0} Shards${u.streak ? ` · ${u.streak}-day streak` : ''}</div>`}
     <div class="side-cat" style="padding-left:0">Member since</div><div class="small">${new Date(u.created_at).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })}</div>
+    ${(() => { const mem = S.view.server && !S.view.lobby && S.members[S.view.server]?.find((x) => x.id === u.id); if (!mem) return ''; const r = { owner: ['Owner', '#f0b232'], admin: ['Admin', '#eb459e'] }[mem.role];
+      return `<div class="side-cat" style="padding-left:0">Roles</div><div class="pp-roles">${r ? `<span class="role-pill"><i style="background:${r[1]}"></i>${r[0]}</span>` : ''}<span class="role-pill"><i style="background:#949ba4"></i>Member</span>${u.is_bot ? '<span class="role-pill"><i style="background:#5865f2"></i>Bot</span>' : ''}</div>`; })()}
     ${u.mutual_servers?.length && !me ? `<div class="side-cat" style="padding-left:0">Mutual servers — ${u.mutual_servers.length}</div>` : ''}</div>
+    ${me ? '' : `<form class="pp-msgbox" id="pp-msgbox"><input name="q" placeholder="Message @${esc(u.username)}" maxlength="4000" autocomplete="off"></form>`}
     <div class="row" style="justify-content:flex-start">${me ? '<button class="btn primary sm" id="pp-edit">Edit Profile</button>' :
       `<button class="btn primary sm" id="pp-msg">Message</button>${u.is_bot ? '' : !fr ? '<button class="btn green sm" id="pp-add">Add Friend</button>' : fr.status === 'incoming' ? '<button class="btn green sm" id="pp-acc">Accept</button>' : ''}${u.is_bot ? '' : '<button class="btn sm" id="pp-block">Block</button>'}`}</div></div></div>`, x, y, 'profile');
   $('#pp-edit') && ($('#pp-edit').onclick = () => { hidePop(); settingsModal('profile'); });
   $('#pp-msg') && ($('#pp-msg').onclick = () => tryRun(() => startDm(u.id)));
+  $('#pp-msgbox') && ($('#pp-msgbox').onsubmit = (e) => { e.preventDefault(); const t = e.target.q.value.trim(); if (!t) return; e.target.q.disabled = true;
+    tryRun(async () => { const d = await api('/dms', { body: { user_ids: [u.id] } }); await api('/messages', { body: { content: t, dm_id: d.id, attachments: [] } });
+      if (!S.dms.find((x) => x.id === d.id)) S.dms.unshift(d); (d.members || []).forEach(cacheUser); hidePop(); await openDm(d.id); }).finally(() => { if (e.target.q) e.target.q.disabled = false; }); });
   $('#pp-add') && ($('#pp-add').onclick = () => tryRun(async () => { await api('/friends', { body: { username: u.username } }); toast('Friend request sent!'); hidePop(); }));
   $('#pp-acc') && ($('#pp-acc').onclick = () => tryRun(async () => { await api(`/friends/${u.id}/accept`, { body: {} }); hidePop(); }));
   $('#pp-block') && ($('#pp-block').onclick = () => confirm('Block ' + u.display_name + '?') && tryRun(async () => { await api(`/friends/${u.id}/block`, { body: {} }); hidePop(); toast('Blocked'); }));
@@ -544,7 +601,14 @@ async function profilePopover(uid, x, y) {
 
 // members panel
 function renderMembers() {
-  const box = $('#members');
+  const box = $('#members'); box.classList.toggle('active-now', S.view.type === 'home' && !S.view.dm);
+  if (S.view.type === 'home' && !S.view.dm) {
+    box.classList.remove('hidden');
+    const act = S.friends.filter((f) => f.status === 'friend' && S.users[f.user.id]?.online).map((f) => S.users[f.user.id] || f.user);
+    box.innerHTML = `<h3 class="an-title">Active Now</h3>` + (act.length ? act.map((u) => `<div class="an-card" data-member="${u.id}"><div class="an-top">${avatar(u, 40, true)}<div style="min-width:0"><b>${esc(u.display_name)}</b><div class="small muted cstatus">${esc(u.custom_status || 'Online')}</div></div></div></div>`).join('')
+      : `<div class="an-empty"><b>All quiet for now</b><p class="small muted">When friends come online or set a status, they'll show up here.</p></div>`);
+    return;
+  }
   if (S.view.dm) { const d = S.dms.find((x) => x.id === S.view.dm); if (!d) return; box.innerHTML = `<h4>Members — ${d.members.length}</h4>` + d.members.map(memberRow).join(''); return; }
   if (!S.view.server) { box.innerHTML = ''; return; }
   const ms = (S.members[S.view.server] || []).map((m) => ({ ...m, online: S.users[m.id]?.online ?? m.online }));
@@ -705,13 +769,23 @@ function addBotToServerModal(s) {
 }
 
 // settings
-function settingsModal(tab = 'profile') {
+function settingsModal(tab = 'account') {
   const u = S.me; const colors = ['#14b8a6', '#10b981', '#eb459e', '#ed4245', '#f97316', '#f0b232', '#57f287', '#f59e0b', '#0f172a', '#ffffff'];
-  const m = modal(`<h2>⚙️ Settings</h2><div class="tabs">${['profile', 'account', 'appearance', 'notifications', 'voice', 'get the app'].map((t) => `<button data-tab="${t}" class="${t === tab ? 'on' : ''}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div><div id="set-body"></div>
-    <div class="row" style="justify-content:space-between"><button class="btn danger" id="logout">Log out</button></div>`, 'wide');
+  if (tab === 'profiles') tab = 'profile';
+  const CATS = [['User Settings', [['account', 'My Account'], ['profile', 'Profiles'], ['privacy', 'Privacy & Safety']]],
+    ['App Settings', [['appearance', 'Appearance'], ['voice', 'Voice & Video'], ['notifications', 'Notifications'], ['keybinds', 'Keybinds'], ['get the app', 'Get the App']]]];
+  const LABEL = Object.fromEntries(CATS.flatMap((c) => c[1]));
+  closeModal(); hidePop();
+  const m = document.createElement('div'); m.className = 'us-root'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-label', 'User Settings');
+  m.innerHTML = `<div class="us-side"><button class="us-close-m" data-close aria-label="Close settings">${ZI('x')}</button><nav class="us-nav">${CATS.map(([h, l]) => `<div class="us-head">${h}</div>${l.map(([k, t]) => `<button data-tab="${k}">${t}</button>`).join('')}<div class="us-sep"></div>`).join('')}
+      <button id="logout" class="us-logout"><span>Log Out</span>${ZI('door')}</button><div class="us-ver">Zuno 1.3 · free and open source</div></nav></div>
+    <div class="us-main"><div class="us-content"><button class="us-back" id="us-back">${ZI('chevronDown')}<span>Settings</span></button><h2 id="us-title"></h2><div id="set-body"></div></div>
+      <div class="us-close"><button data-close title="Close (Esc)" aria-label="Close settings">${ZI('x')}</button><span>ESC</span></div></div>`;
+  $('#modal-root').appendChild(m); m.querySelectorAll('[data-close]').forEach((x) => (x.onclick = () => closeModal()));
   const body = $('#set-body', m);
   const draw = (t) => {
-    m.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
+    m.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === t)); $('#us-title', m).textContent = LABEL[t] || 'Settings';
+    m.classList.add('show-content'); m.querySelector('.us-main').scrollTop = 0;
     if (t === 'profile') {
       body.innerHTML = `<div style="display:flex;gap:20px;flex-wrap:wrap"><form id="pf" style="flex:1;min-width:260px"><label>Display name<input name="display_name" value="${esc(u.display_name)}" maxlength="32"></label>
         <label>Pronouns<input name="pronouns" value="${esc(u.pronouns || '')}" maxlength="40"></label><label>Custom status<input name="custom_status" value="${esc(u.custom_status || '')}" placeholder="Playing Roblox"></label>
@@ -734,8 +808,13 @@ function settingsModal(tab = 'profile') {
         if (f.avatar.files[0]) bd.avatar = await uploadOne(f.avatar.files[0]); if (f.banner.files[0]) bd.banner = await uploadOne(f.banner.files[0]); await patch(bd); }); };
     }
     if (t === 'account') {
-      body.innerHTML = `<form id="un"><label>Username<input name="username" value="${esc(u.username)}" maxlength="32" pattern="[a-zA-Z0-9_.]{2,32}" required></label><div class="small muted">2-32 letters, numbers, _ or .</div><div class="row"><button class="btn primary">Change username</button></div></form><p>Email: <b>${esc(u.email || '')}</b></p><form id="pw"><label>Current password<input type="password" name="current_password" required></label><label>New password<input type="password" name="new_password" minlength="6" required></label><div class="row"><button class="btn primary">Change password</button></div></form>
+      body.innerHTML = `<div class="acct-card"><div class="acct-banner" style="background:${u.banner ? `url('${esc(u.banner)}') center/cover` : esc(u.banner_color || '#5865f2')}"></div>
+        <div class="acct-top">${avatar({ ...u, online: true }, 80, true)}<b>${esc(u.display_name)}</b><button class="btn primary sm" id="acct-edit">Edit User Profile</button></div>
+        <div class="acct-fields"><div><span>Display name</span><b>${esc(u.display_name)}</b></div><div><span>Username</span><b>${esc(u.username)}</b></div><div><span>Email</span><b>${esc(u.email || 'Not set')}</b></div>
+        <div><span>Member since</span><b>${u.created_at ? new Date(u.created_at).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' }) : ''}</b></div></div></div>
+        <h3 class="us-h3">Password and username</h3><form id="un"><label>Username<input name="username" value="${esc(u.username)}" maxlength="32" pattern="[a-zA-Z0-9_.]{2,32}" required></label><div class="small muted">2-32 letters, numbers, _ or .</div><div class="row"><button class="btn primary">Change username</button></div></form><p>Email: <b>${esc(u.email || '')}</b></p><form id="pw"><label>Current password<input type="password" name="current_password" required></label><label>New password<input type="password" name="new_password" minlength="6" required></label><div class="row"><button class="btn primary">Change password</button></div></form>
         <div class="side-cat" style="padding-left:0;color:var(--red)">Danger zone</div><form id="delacc"><label>Type your password to delete your account forever<input type="password" name="password" required></label><div class="row"><button class="btn danger">Delete account</button></div></form>`;
+      $('#acct-edit').onclick = () => draw('profile');
       $('#delacc').onsubmit = (e) => { e.preventDefault(); if (!confirm('Delete your Zuno account forever? Your messages will show as Deleted User.')) return; tryRun(async () => { await api('/me/delete', { body: { password: e.target.password.value } }); closeModal(); toast('Account deleted'); logout(); }); };
       $('#un').onsubmit = (e) => { e.preventDefault(); tryRun(async () => { const nu = await api('/me', { method: 'PATCH', body: { username: e.target.username.value } }); Object.assign(S.me, nu); cacheUser(nu); renderMe(); toast('Username changed to @' + nu.username); }); };
       $('#pw').onsubmit = (e) => { e.preventDefault(); tryRun(async () => { await api('/me', { method: 'PATCH', body: Object.fromEntries(new FormData(e.target)) }); e.target.reset(); toast('Password changed'); }); };
@@ -754,16 +833,31 @@ function settingsModal(tab = 'profile') {
       $('#snd-vol').oninput = (e) => Z.setPref('volume', e.target.value / 100);
       $('#notif').onclick = () => window.ZunoAndroid ? (ZunoAndroid.askNotify?.(), toast('Notifications on')) : window.Notification?.requestPermission().then((p) => toast(p === 'granted' ? 'Notifications on' : 'Notifications blocked by your browser'));
     }
+    if (t === 'privacy') {
+      const blocked = S.friends.filter((f) => f.status === 'blocked');
+      body.innerHTML = `<p class="muted">Blocking someone hides their messages from you, removes them as a friend and stops their friend requests and DMs.</p>
+        <h3 class="us-h3">Blocked users — ${blocked.length}</h3>${blocked.map((f) => `<div class="friend-row" data-uid="${f.user.id}">${avatar(f.user, 32)}<div class="grow"><b>${esc(f.user.display_name)}</b> <span class="muted small">@${esc(f.user.username)}</span></div><button class="btn sm" data-unblock="${f.user.id}">Unblock</button></div>`).join('') || '<p class="small muted">You haven\'t blocked anyone.</p>'}
+        <h3 class="us-h3">Server privacy</h3><p class="small muted">Server owners can make a server invite-only or ask questions before people join (Server settings → Join mode). Only people in a server can read its channels.</p>
+        <h3 class="us-h3">Your data</h3><p class="small muted">Your account can be deleted at any time from My Account. Zuno is open source, so you can read exactly what it stores.</p>`;
+      body.querySelectorAll('[data-unblock]').forEach((b) => (b.onclick = () => tryRun(async () => { await api(`/friends/${b.dataset.unblock}/unblock`, { body: {} }); S.friends = S.friends.filter((f) => !(f.user.id === b.dataset.unblock && f.status === 'blocked')); draw('privacy'); toast('Unblocked'); })));
+    }
+    if (t === 'keybinds') {
+      const K = [['Close a menu, popup or this screen', ['Esc']], ['Send a message', ['Enter']], ['New line in a message', ['Shift', 'Enter']], ['Edit your last message', ['↑']], ['Cancel a reply or an edit', ['Esc']],
+        ['Message menu (react, reply, thread, pin, copy…)', ['Right-click']], ['Message menu on a phone', ['Long-press']], ['Mention someone', ['@']]];
+      body.innerHTML = `<p class="muted">Shortcuts that work everywhere in Zuno.</p><div class="kb-list">${K.map(([d, keys]) => `<div class="kb-row"><span>${d}</span><span>${keys.map((k) => `<kbd>${esc(k)}</kbd>`).join(' + ')}</span></div>`).join('')}</div>`;
+    }
     if (t === 'voice') window.ZV?.settings(body);
     if (t === 'get the app') {
-      body.innerHTML = `<div class="dl-grid"><div class="dl"><div style="font-size:34px">🤖</div><b>Android</b><p class="small muted">Download the APK, then allow "install unknown apps" when asked.</p><a class="btn primary" href="https://github.com/arazJjj/Zuno/releases/latest" target="_blank">Download for Android</a></div>
+      body.innerHTML = `<div class="dl-grid"><div class="dl"><div style="font-size:34px">🤖</div><b>Android</b><p class="small muted">Download the APK, then allow "install unknown apps" when asked.</p><a class="btn primary" href="/download/android" target="_blank">Download for Android</a></div>
         <div class="dl"><div style="font-size:34px">🍎</div><b>iPhone & iPad</b><p class="small muted">Open Zuno in Safari, tap Share, then "Add to Home Screen".</p></div>
         <div class="dl"><div style="font-size:34px">💻</div><b>Windows, Mac & Linux</b><p class="small muted">In Chrome or Edge, click the install icon in the address bar to get Zuno as an app.</p><button class="btn" id="pwa-btn">Install app</button></div></div>
-        <p class="small muted">Zuno is free and open source. <a href="https://github.com/arazJjj/Zuno" target="_blank">See the code</a></p>`;
+        <p class="small muted">Zuno is free and open source. <a href="https://github.com/arazJjj/Zuno-opensource-discord-clone" target="_blank">See the code</a></p>`;
       $('#pwa-btn').onclick = () => { if (window._pwa) { window._pwa.prompt(); } else toast('Use your browser menu → Install Zuno'); };
     }
   };
-  m.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => draw(b.dataset.tab))); draw(tab);
+  m.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => draw(b.dataset.tab))); draw(LABEL[tab] ? tab : 'account');
+  if (innerWidth <= 820 && !arguments.length) m.classList.remove('show-content');
+  $('#us-back', m)?.addEventListener('click', () => m.classList.remove('show-content'));
   $('#logout', m).onclick = () => { closeModal(); logout(); };
 }
 
@@ -782,7 +876,7 @@ async function emojiAdminModal(s) {
 // invite links: /invite/CODE
 (async () => {
   const mInv = location.pathname.match(/^\/invite\/([\w-]+)/);
-  if (mInv) { sessionStorage.zunoInvite = mInv[1]; history.replaceState(null, '', '/'); }
+  if (mInv) { sessionStorage.zunoInvite = mInv[1]; history.replaceState(null, '', '/app'); }
   await start();
 })();
 

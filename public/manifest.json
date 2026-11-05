@@ -1,2 +1,2 @@
-{ "name": "Zuno", "short_name": "Zuno", "start_url": "/", "display": "standalone", "background_color": "#1e1f22", "theme_color": "#1e1f22",
+{ "name": "Zuno", "short_name": "Zuno", "start_url": "/app", "display": "standalone", "background_color": "#1e1f22", "theme_color": "#1e1f22",
   "icons": [{ "src": "/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }] }
