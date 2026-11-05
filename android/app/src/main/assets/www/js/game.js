@@ -436,7 +436,7 @@
     q.p.alive = false; q.p.mesh.visible = false; game.collected++; hide('quiz'); game.state = 'play'; game.quiz = null;
     if (wrong > 0) {
       const first = game.anger <= 0; game.anger += wrong;
-      if (first) { luke.pulseT = 1.2; VO.play('chase_start'); } else ui.sub('Mr. Luke is getting faster... (' + wrong + ' wrong)', '#ff8a80', 2.5);
+      if (first) { luke.pulseT = 1.2; VO.play('chase_start'); } else { VO.play(Math.random() < 0.5 ? 'bonus_say_no_more' : 'bonus_now_while_you_can_do_it'); setTimeout(function () { ui.sub('Mr. Luke is getting faster... (' + wrong + ' wrong)', '#ff8a80', 2.5); }, 2600); }
     } else VO.play('notebook_' + game.collected, 'ipad_' + game.collected);
     if (game.collected >= 7) setTimeout(startEscape, 1200);
     updateHUD(); lockPointer();

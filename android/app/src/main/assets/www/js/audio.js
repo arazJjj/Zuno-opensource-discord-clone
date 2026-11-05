@@ -97,7 +97,13 @@
     exit_start: ['Mr. Luke', "You found all my iPads... Now try to get OUT. Four exits. I'll be waiting!"],
     exit_1: ['Mr. Luke', "One exit closed! Don't get comfortable... the lights are changing."],
     exit_2: ['Mr. Luke', 'Two! I can hear your footsteps from here!'],
-    exit_3: ['Mr. Luke', 'Three?! ONE more... if you can get there before ME!']
+    exit_3: ['Mr. Luke', 'Three?! ONE more... if you can get there before ME!'],
+    // bonus lines: Araz's own original recording (only the last two are used in game)
+    bonus_come_back_away: ['Mr. Luke', 'Come back away!'],
+    bonus_you_give_back: ['Mr. Luke', 'You give back!'],
+    bonus_now_i_will_do_this: ['Mr. Luke', 'Now I will do this.'],
+    bonus_say_no_more: ['Mr. Luke', 'Say no more!'],
+    bonus_now_while_you_can_do_it: ['Mr. Luke', 'Now while you can do it!']
   };
   V.probeAll = function (done) {
     if (V.probed) { if (done) done(); return; }
